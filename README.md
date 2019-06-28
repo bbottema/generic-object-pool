@@ -6,7 +6,7 @@ policies.
 
 [API Documentation](https://www.javadoc.io/doc/com.github.bbottema/generic-object-pool/1.0.0)
 
-### Setup
+## Setup
 
 Maven Dependency Setup
 
@@ -130,7 +130,7 @@ static class FooAllocator extends Allocator<Foo> {
 }
 ```
 
-#### Getting metrics at any point during the pool's existence:
+#### Metrics
 
 ```java
 PoolMetrics metrics = pool.getPoolMetrics();
