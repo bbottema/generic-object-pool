@@ -20,7 +20,7 @@ Maven Dependency Setup
 
 ## Usage
 
-Creating pools:
+#### Creating pools
 
 ```java
 // basic pool with no eager loading and no expiry policy
@@ -43,6 +43,8 @@ PoolConfig<Foo> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
 GenericObjectPool<Foo> pool = new SimpleObjectPool<>(poolConfig, new MyFooAllocator());
 ````
 
+#### Claim / release API
+
 Claiming objects from the pool (blocking):
 ```java
 // borrow an object and block until available
@@ -62,7 +64,8 @@ obj.release(); // make available for reuse
 obj.invalidate(); // remove from pool, deallocating
 ````
 
-Shutting down a pool:
+#### Shutting down a pool
+
 ```java
 Future<?> shutdownSequence = pool.shutdown();
 
@@ -71,6 +74,8 @@ shutdownSequence.get();
 // until timeout
 shutdownSequence.get(10, TimeUnit.SECONDS);
 ````
+
+#### Creating your objects
 
 Implementing a simple Allocator to create your objects when populating the pool either eagerly or lazily.
 Every method except `allocate` is optional:
@@ -125,7 +130,8 @@ static class FooAllocator extends Allocator<Foo> {
 }
 ```
 
-Getting metrics at any point during the pool's existence:
+#### Getting metrics at any point during the pool's existence:
+
 ```java
 PoolMetrics metrics = pool.getPoolMetrics();
 metrics.getCurrentlyClaimed(); // currently claimed by threads and not released yet
@@ -143,3 +149,7 @@ PoolConfig<Foo> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
    .threadFactory(new MyCustomThreadFactory())
    .build();
 ```
+
+### Other Expiry strategies
+
+...
