@@ -27,7 +27,7 @@ PoolConfig<Foo> poolConfig = PoolConfig.<Foo>builder()
    .maxPoolsize(10)
    .build();
 
-SimpleObjectPool<Foo> pool = new SimpleObjectPool<>(poolConfig, new MyFooAllocator());
+GenericObjectPool<Foo> pool = new SimpleObjectPool<>(poolConfig, new MyFooAllocator());
 ```
 
 ```java
@@ -38,7 +38,7 @@ PoolConfig<Foo> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
    .expirationPolicy(new TimeoutSinceLastAllocationExpirationPolicy<Foo>(30, TimeUnit.SECONDS))
    .build();
 
-SimpleObjectPool<Foo> pool = new SimpleObjectPool<>(poolConfig, new MyFooAllocator());
+GenericObjectPool<Foo> pool = new SimpleObjectPool<>(poolConfig, new MyFooAllocator());
 ````
 The above pool eagerly warms up 20 Foo instances and expires them 30 seconds after they have last been allocated.
 
