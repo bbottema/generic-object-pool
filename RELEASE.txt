@@ -1,0 +1,9 @@
+https://github.com/bbottema/generic-object-pool
+
+
+RELEASE NOTES Generic Object Pool
+
+
+v1.0.0
+
+- Initial release.
