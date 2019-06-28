@@ -24,7 +24,7 @@ public class PoolableObject<T> {
 	}
 
 	@ToString.Exclude
-	private final SimpleObjectPool<T> pool;
+	private final GenericObjectPool<T> pool;
 	/**
 	 * Contains:
 	 * <ul>
@@ -48,7 +48,7 @@ public class PoolableObject<T> {
 	 */
 	@NotNull @Getter(PACKAGE) @Setter(PACKAGE) private PoolStatus currentPoolStatus;
 	
-	PoolableObject(@NotNull SimpleObjectPool<T> pool, @NotNull T allocatedObject) {
+	PoolableObject(@NotNull GenericObjectPool<T> pool, @NotNull T allocatedObject) {
 		this.pool = pool;
 		this.allocatedObject = allocatedObject;
 		this.creationStampMs = System.currentTimeMillis();

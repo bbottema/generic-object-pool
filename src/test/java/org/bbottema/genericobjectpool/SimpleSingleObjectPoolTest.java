@@ -16,12 +16,12 @@ import static org.bbottema.genericobjectpool.ObjectPoolTestHelper.createAllocato
 
 public class SimpleSingleObjectPoolTest {
 
-	private SimpleObjectPool<String> pool1, pool2;
+	private GenericObjectPool<String> pool1, pool2;
 	
 	@Before
 	public void setup() {
-		pool1 = new SimpleObjectPool<>(PoolConfig.<String>builder().maxPoolsize(1).build(), createAllocator("a"));
-		pool2 = new SimpleObjectPool<>(PoolConfig.<String>builder().maxPoolsize(1).build(), createAllocator("b"));
+		pool1 = new GenericObjectPool<>(PoolConfig.<String>builder().maxPoolsize(1).build(), createAllocator("a"));
+		pool2 = new GenericObjectPool<>(PoolConfig.<String>builder().maxPoolsize(1).build(), createAllocator("b"));
 	}
 	
 	@Test
@@ -63,7 +63,7 @@ public class SimpleSingleObjectPoolTest {
 	}
 	
 	@Test
-	public void manyThreadsBlockingUntilObtained() throws Exception {
+	public void manyThreadsBlockingUntilObtainedPool2() throws Exception {
 		waitForObjectWithTimeoutTest();
 		
 		Runnable r = new Runnable() {
@@ -87,7 +87,7 @@ public class SimpleSingleObjectPoolTest {
 			es.submit(r);
 		es.shutdown();
 		es.awaitTermination(2, TimeUnit.SECONDS);
-		verifyMetrics();
+		verifyPool1RemainsUnaffected();
 	}
 	
 	@Test
@@ -95,24 +95,22 @@ public class SimpleSingleObjectPoolTest {
 		PoolableObject<String> obj = pool2.claim();
 		assertThat(obj).isNotNull();
 		pool2.releasePoolableObject(obj);
-		verifyMetrics();
+		verifyPool1RemainsUnaffected();
 	}
 	
-	private void verifyMetrics() {
+	private void verifyPool1RemainsUnaffected() {
 		PoolMetrics metrics = pool1.getPoolMetrics();
 		assertThat(metrics).isNotNull();
 		assertThat(metrics.getClaimedCount()).isZero();
 		assertThat(metrics.getWaitingCount()).isZero();
+		assertThat(metrics.getTotalAllocated()).isZero();
+		assertThat(metrics.getTotalClaimed()).isZero();
 	}
 	
 	@Test
-	public void testMetrics() throws Exception {
-		manyThreadsBlockingUntilObtained();
-
-		PoolMetrics metrics = pool1.getPoolMetrics();
-		assertThat(metrics).isNotNull();
-		assertThat(metrics.getClaimedCount()).isZero();
-		assertThat(metrics.getWaitingCount()).isZero();
+	public void verifyPool1RemainsUnaffectedAfterClaimingPool2() throws Exception {
+		manyThreadsBlockingUntilObtainedPool2();
+		verifyPool1RemainsUnaffected();
 	}
 	
 	/**
@@ -120,7 +118,7 @@ public class SimpleSingleObjectPoolTest {
 	 */
 	@Test(expected = IllegalStateException.class)
 	public void testShutdown() throws Exception {
-		testMetrics();
+		verifyPool1RemainsUnaffectedAfterClaimingPool2();
 		
 		pool1.shutdown();
 		pool2.shutdown();
@@ -140,7 +138,7 @@ public class SimpleSingleObjectPoolTest {
 	@Test
 	public void testObjectLifecycle() throws Exception {
 		TestLifecycleAllocator allocator = new TestLifecycleAllocator();
-		SimpleObjectPool<Boolean> pool = new SimpleObjectPool<>(PoolConfig.<Boolean>builder().maxPoolsize(1).build(), allocator);
+		GenericObjectPool<Boolean> pool = new GenericObjectPool<>(PoolConfig.<Boolean>builder().maxPoolsize(1).build(), allocator);
 
 		PoolableObject<Boolean> obj = pool.claim();
 		if (obj == null) {

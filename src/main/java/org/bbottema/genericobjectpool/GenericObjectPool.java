@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -21,7 +22,7 @@ import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.Executors.newSingleThreadExecutor;
 
 @Slf4j
-public class SimpleObjectPool<T> {
+public class GenericObjectPool<T> {
 	
 	@NotNull private final Lock lock = new ReentrantLock();
 	@NotNull private final LinkedList<PoolableObject<T>> available = new LinkedList<>();
@@ -34,7 +35,10 @@ public class SimpleObjectPool<T> {
 	
 	@Nullable private volatile Future<?> shutdownSequence;
 	
-	public SimpleObjectPool(@NotNull final PoolConfig<T> poolConfig, @NotNull final Allocator<T> allocator) {
+	@NotNull private final AtomicLong totalAllocated = new AtomicLong();
+	@NotNull private final AtomicLong totalClaimed = new AtomicLong();
+	
+	public GenericObjectPool(@NotNull final PoolConfig<T> poolConfig, @NotNull final Allocator<T> allocator) {
 		this.poolConfig = poolConfig;
 		this.allocator = allocator;
 		poolConfig.getThreadFactory().newThread(new AutoAllocatorDeallocator()).start();
@@ -129,10 +133,13 @@ public class SimpleObjectPool<T> {
 			claimedObject.resetAllocationTimestamp();
 			claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.CLAIMED);
 			claimed.add(claimedObject);
+			totalClaimed.incrementAndGet();
 		} else if (getCurrentlyAllocated() < poolConfig.getMaxPoolsize()) {
 			claimedObject = new PoolableObject<>(this, allocator.allocate());
 			claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.CLAIMED);
 			claimed.add(claimedObject);
+			totalAllocated.incrementAndGet();
+			totalClaimed.incrementAndGet();
 		}
 		return claimedObject;
 	}
@@ -190,7 +197,13 @@ public class SimpleObjectPool<T> {
 	public PoolMetrics getPoolMetrics() {
 		lock.lock();
 		try {
-			return new PoolMetrics(claimed.size(), objectAvailableConditions.size(), getCurrentlyAllocated(), poolConfig.getMaxPoolsize());
+			return new PoolMetrics(
+					claimed.size(),
+					objectAvailableConditions.size(),
+					getCurrentlyAllocated(),
+					poolConfig.getMaxPoolsize(),
+					totalAllocated.get(),
+					totalClaimed.get());
 		} finally {
 			lock.unlock();
 		}
@@ -219,7 +232,8 @@ public class SimpleObjectPool<T> {
 			lock.lock();
 			try {
 				while (getCurrentlyAllocated() < poolConfig.getCorePoolsize() && !isShuttingDown()) {
-					available.add(new PoolableObject<>(SimpleObjectPool.this, allocator.allocate()));
+					available.add(new PoolableObject<>(GenericObjectPool.this, allocator.allocate()));
+					totalAllocated.incrementAndGet();
 				}
 				if (!waitingForDeallocation.isEmpty()) {
 					deallocate(waitingForDeallocation.remove());

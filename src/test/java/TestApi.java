@@ -4,8 +4,7 @@ import org.bbottema.genericobjectpool.Allocator;
 import org.bbottema.genericobjectpool.PoolConfig;
 import org.bbottema.genericobjectpool.PoolMetrics;
 import org.bbottema.genericobjectpool.PoolableObject;
-import org.bbottema.genericobjectpool.SimpleObjectPool;
-import org.bbottema.genericobjectpool.expirypolicies.TimeoutSinceLastAllocationExpirationPolicy;
+import org.bbottema.genericobjectpool.GenericObjectPool;
 import org.jetbrains.annotations.NotNull;
 import org.junit.Test;
 
@@ -28,7 +27,7 @@ public class TestApi {
         final PoolConfig<AtomicReference<Integer>> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
                 .maxPoolsize(3)
                 .build();
-        SimpleObjectPool<AtomicReference<Integer>> pool = new SimpleObjectPool<>(poolConfig, new MyAllocator());
+        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
         
         PoolableObject<AtomicReference<Integer>> obj1 = pool.claim();
         PoolableObject<AtomicReference<Integer>> obj2 = pool.claim();
@@ -56,7 +55,7 @@ public class TestApi {
     
     @Test
     public void testShutdownWithWaitingThreads() throws Exception {
-        final SimpleObjectPool<AtomicReference<Integer>> pool = new SimpleObjectPool<>(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(1).build(), new MyAllocator());
+        final GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(1).build(), new MyAllocator());
         
         ExecutorService es = Executors.newSingleThreadExecutor();
         
@@ -97,12 +96,12 @@ public class TestApi {
         assertThat(claimedPoolable1.get().getAllocatedObject()).isNull();
         assertThat(claimedPoolable2.get()).isNull();
     
-        assertAllMetricsZero(pool);
+        assertAllMetricsZero(pool, 1, 1);
     }
     
     @Test
     public void testShutdownWithAvailableObjects() throws Exception {
-        final SimpleObjectPool<AtomicReference<Integer>> pool = new SimpleObjectPool<>(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(2).build(), new MyAllocator());
+        final GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(2).build(), new MyAllocator());
         
         ExecutorService es = Executors.newSingleThreadExecutor();
         
@@ -148,18 +147,20 @@ public class TestApi {
         assertThat(poolableObj1.getAllocatedObject()).isNull();
         assertThat(poolableObj2.getAllocatedObject()).isNull();
     
-        assertAllMetricsZero(pool);
+        assertAllMetricsZero(pool, 2, 2);
     }
     
-    private void assertAllMetricsZero(SimpleObjectPool<AtomicReference<Integer>> pool) {
+    private void assertAllMetricsZero(GenericObjectPool<AtomicReference<Integer>> pool, long expectedTotalAllocated, long expectedTotalClaimed) {
         final PoolMetrics poolMetrics = pool.getPoolMetrics();
         assertThat(poolMetrics.getClaimedCount()).isZero();
         assertThat(poolMetrics.getAllocationSize()).isZero();
         assertThat(poolMetrics.getWaitingCount()).isZero();
+        assertThat(poolMetrics.getTotalAllocated()).isEqualTo(expectedTotalAllocated);
+        assertThat(poolMetrics.getTotalClaimed()).isEqualTo(expectedTotalClaimed);
     }
     
     @NotNull
-    private AtomicReference<Future<?>> claimInNewThread(SimpleObjectPool<AtomicReference<Integer>> pool, ExecutorService es, AtomicReference<PoolableObject<AtomicReference<Integer>>> claimedPoolable1) {
+    private AtomicReference<Future<?>> claimInNewThread(GenericObjectPool<AtomicReference<Integer>> pool, ExecutorService es, AtomicReference<PoolableObject<AtomicReference<Integer>>> claimedPoolable1) {
         AtomicReference<Future<?>> claimer1Ref = new AtomicReference<>();
         claimer1Ref.set(es.submit(new ConcurrentClaimer(pool, claimedPoolable1, claimer1Ref)));
         return claimer1Ref;
@@ -177,7 +178,7 @@ public class TestApi {
     
     @RequiredArgsConstructor
     private static class ConcurrentClaimer implements Runnable {
-        @NotNull private final SimpleObjectPool<AtomicReference<Integer>> pool;
+        @NotNull private final GenericObjectPool<AtomicReference<Integer>> pool;
         @NotNull private final AtomicReference<PoolableObject<AtomicReference<Integer>>> claimedPoolable;
         @NotNull private final AtomicReference<Future<?>> claimer1Ref;
         

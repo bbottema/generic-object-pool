@@ -17,13 +17,13 @@ public class SimpleMultipleObjectPoolTest {
 	private static final int OVER_LIMIT_DELTA = 25;
 	private static final int OVER_LIMIT_BLOCK_THREAD_COUNT = MAX_ITEMS_PER_KEY + OVER_LIMIT_DELTA;
 	
-	private SimpleObjectPool<String> pool1, pool2, pool3;
+	private GenericObjectPool<String> pool1, pool2, pool3;
 
 	@Before
 	public void setup() {
-		pool1 = new SimpleObjectPool<>(PoolConfig.<String>builder().maxPoolsize(MAX_ITEMS_PER_KEY).build(), ObjectPoolTestHelper.createAllocator("a"));
-		pool2 = new SimpleObjectPool<>(PoolConfig.<String>builder().maxPoolsize(MAX_ITEMS_PER_KEY).build(), ObjectPoolTestHelper.createAllocator("b"));
-		pool3 = new SimpleObjectPool<>(PoolConfig.<String>builder().maxPoolsize(MAX_ITEMS_PER_KEY).build(), ObjectPoolTestHelper.createAllocator("c"));
+		pool1 = new GenericObjectPool<>(PoolConfig.<String>builder().maxPoolsize(MAX_ITEMS_PER_KEY).build(), ObjectPoolTestHelper.createAllocator("a"));
+		pool2 = new GenericObjectPool<>(PoolConfig.<String>builder().maxPoolsize(MAX_ITEMS_PER_KEY).build(), ObjectPoolTestHelper.createAllocator("b"));
+		pool3 = new GenericObjectPool<>(PoolConfig.<String>builder().maxPoolsize(MAX_ITEMS_PER_KEY).build(), ObjectPoolTestHelper.createAllocator("c"));
 	}
 
 	@Test
@@ -43,12 +43,16 @@ public class SimpleMultipleObjectPoolTest {
 		// Make sure we are fully Allocated
 		PoolMetrics metrics = pool2.getPoolMetrics();
 		assertThat(metrics.getAllocationSize()).isEqualTo(MAX_ITEMS_PER_KEY);
+		assertThat(metrics.getTotalAllocated()).isEqualTo(MAX_ITEMS_PER_KEY);
+		assertThat(metrics.getTotalClaimed()).isEqualTo(MAX_ITEMS_PER_KEY + MAX_ITEMS_PER_KEY);
 		
 		// Run again and invalidate vs release
 		ExecutionContext executionContext2 = ExecutionContext.builder().failIfUnableToClaim(true).reusable(false).sleepTime(20).build();
 		executeAndWait(createThreadedExecution(pool2, MAX_ITEMS_PER_KEY, executionContext2), executionContext2);
 		metrics = pool1.getPoolMetrics();
 		assertThat(metrics.getAllocationSize()).isZero();
+		assertThat(metrics.getTotalAllocated()).isZero();
+		assertThat(metrics.getTotalClaimed()).isZero();
 	}
 	
 	@Test
@@ -65,28 +69,33 @@ public class SimpleMultipleObjectPoolTest {
 	public void highConcurrencyVolumeTest() throws Exception {
 		maxAllocatedTestAgainstSameKey();
 
+		final int claimExtraCount = 100;
 		ExecutionContext context = ExecutionContext.builder().maxWaitTime(Long.MAX_VALUE).sleepTime(10).build();
-		executeAndWait(createThreadedExecution(pool2, 100, context), context);
+		executeAndWait(createThreadedExecution(pool2, claimExtraCount, context), context);
 		
 		assertThat(context.getTimeoutCount().get()).isZero();
 
 		PoolMetrics metrics = pool2.getPoolMetrics();
 		assertThat(metrics.getAllocationSize()).isEqualTo(MAX_ITEMS_PER_KEY);
+		assertThat(metrics.getTotalAllocated()).isEqualTo(MAX_ITEMS_PER_KEY);
+		assertThat(metrics.getTotalClaimed()).isEqualTo(MAX_ITEMS_PER_KEY + claimExtraCount);
 	}
 	
 	@Test
-	public void testPoolSizes() throws Exception {
+	public void testPoolsDontAffectEachother() throws Exception {
 		allocationsAgainstMultipleKeysFailIfTimeoutOccurs();
 
 		PoolMetrics metrics = pool1.getPoolMetrics();
 		assertThat(metrics).isNotNull();
 		assertThat(metrics.getClaimedCount()).isZero();
 		assertThat(metrics.getWaitingCount()).isZero();
+		assertThat(metrics.getTotalAllocated()).isEqualTo(0);
+		assertThat(metrics.getTotalClaimed()).isEqualTo(0);
 	}
 	
 	@Test
 	public void testShutdown() throws Exception {
-		testPoolSizes();
+		testPoolsDontAffectEachother();
 		
 		pool1.shutdown();
 		try {
@@ -98,7 +107,7 @@ public class SimpleMultipleObjectPoolTest {
 		}
 	}
 	
-	private Set<Thread> createThreadedExecution(final SimpleObjectPool<String> pool, int threadCount, final ExecutionContext context) {
+	private Set<Thread> createThreadedExecution(final GenericObjectPool<String> pool, int threadCount, final ExecutionContext context) {
 		Set<Thread> threads = new HashSet<>(threadCount);
 		for (int i = 0; i < threadCount; i++) {
 			threads.add(new Thread(new Runnable() {
@@ -129,11 +138,11 @@ public class SimpleMultipleObjectPoolTest {
 		}
 	}
 	
-	private void validateClaimFromPool(SimpleObjectPool<String> pool, ExecutionContext context) throws Exception {
+	private void validateClaimFromPool(GenericObjectPool<String> pool, ExecutionContext context) throws Exception {
 		validateClaimFromPool(context, pool);
 	}
 
-	private void validateClaimFromPool(ExecutionContext context, SimpleObjectPool<String> pool) throws Exception {
+	private void validateClaimFromPool(ExecutionContext context, GenericObjectPool<String> pool) throws Exception {
 		PoolableObject<String> obj = null;
 		try {
 			obj = pool.claim(context.getMaxWaitTime(), TimeUnit.MILLISECONDS);
@@ -145,7 +154,10 @@ public class SimpleMultipleObjectPoolTest {
 			if (context.isFailIfUnableToClaim()) {
 				fail("Unable to claim object : " + e.getMessage(), e);
 			} else {
-				assertThat(pool.getPoolMetrics().getClaimedCount()).isEqualTo(MAX_ITEMS_PER_KEY);
+				final PoolMetrics metrics = pool.getPoolMetrics();
+				assertThat(metrics.getClaimedCount()).isEqualTo(MAX_ITEMS_PER_KEY);
+				assertThat(metrics.getTotalAllocated()).isEqualTo(MAX_ITEMS_PER_KEY);
+				assertThat(metrics.getTotalClaimed()).isEqualTo(MAX_ITEMS_PER_KEY);
 			}
 
 			context.getTimeoutCount().incrementAndGet();
