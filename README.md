@@ -77,7 +77,7 @@ Every method except `allocate` is optional:
 ```java
 static class FooAllocator extends Allocator<Foo> {
 	/**
-	 * Initial creation and initialization. <br/>
+	 * Initial creation and initialization.
 	 * Called when claim comes or when pool is eagerly loading for core size.
 	 */
 	@Override
@@ -91,7 +91,7 @@ More comprehensive life cycle management:
 ```java
 static class FooAllocator extends Allocator<Foo> {
 	/**
-	 * Initial creation and initialization. <br/>
+	 * Initial creation and initialization.
 	 * Called when claim comes or when pool is eagerly loading for core size.
 	 */
 	@Override
