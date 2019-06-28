@@ -1,7 +1,7 @@
 https://github.com/bbottema/generic-object-pool
 
 
-RELEASE NOTES Generic Object Pool
+RELEASE NOTES generic-object-pool
 
 
 v1.0.0

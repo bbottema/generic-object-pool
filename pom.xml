@@ -6,7 +6,7 @@
 	<groupId>com.github.bbottema</groupId>
 	<artifactId>generic-object-pool</artifactId>
 	<packaging>jar</packaging>
-	<name>Generic Object Pool</name>
+	<name>generic-object-pool</name>
 	<version>1.0.0-SNAPSHOT</version>
 	<description>Flexible thread-safe generic object pool</description>
 	<url>http:///github.com/bbottema/generic-object-pool</url>

@@ -1,6 +1,7 @@
-# Generic Object Pool
+# generic-object-pool
 
-GOP is a lightweight generic object pool, providing object lifecycle management, metrics, claim / release mechanism and object invalidation, as well as auto initialize a core pool and auto expiry 
+generic-object-pool is a lightweight generic object pool, providing object lifecycle management, metrics, claim / release mechanism and object invalidation, as well as auto initialize a core pool and 
+auto expiry 
 policies.
 
 [API Documentation](https://www.javadoc.io/doc/com.github.bbottema/generic-object-pool/1.0.0)
