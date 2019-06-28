@@ -42,7 +42,6 @@ PoolConfig<Foo> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
 
 GenericObjectPool<Foo> pool = new SimpleObjectPool<>(poolConfig, new MyFooAllocator());
 ````
-The above pool eagerly warms up 20 Foo instances and expires them 30 seconds after they have last been allocated.
 
 Claiming objects from the pool (blocking):
 ```java
