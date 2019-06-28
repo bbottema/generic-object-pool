@@ -51,7 +51,7 @@ PoolableObject<Foo> obj = pool.claim();
 
 Claiming objects from the pool (blocking until timeout):
 ```java
-PoolableObject<Foo> obj = pool.claim(key, 1, TimeUnit.SECONDS);
+PoolableObject<Foo> obj = pool.claim(key, 1, TimeUnit.SECONDS); // null if timed out
 ````
 
 Releasing Objects back to the Pool:
