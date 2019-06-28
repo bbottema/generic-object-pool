@@ -201,6 +201,7 @@ public class GenericObjectPool<T> {
 					claimed.size(),
 					objectAvailableConditions.size(),
 					getCurrentlyAllocated(),
+					poolConfig.getCorePoolsize(),
 					poolConfig.getMaxPoolsize(),
 					totalAllocated.get(),
 					totalClaimed.get());

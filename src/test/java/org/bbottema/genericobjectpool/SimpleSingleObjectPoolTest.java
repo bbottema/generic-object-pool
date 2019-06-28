@@ -101,8 +101,8 @@ public class SimpleSingleObjectPoolTest {
 	private void verifyPool1RemainsUnaffected() {
 		PoolMetrics metrics = pool1.getPoolMetrics();
 		assertThat(metrics).isNotNull();
-		assertThat(metrics.getClaimedCount()).isZero();
-		assertThat(metrics.getWaitingCount()).isZero();
+		assertThat(metrics.getCurrentlyClaimed()).isZero();
+		assertThat(metrics.getCurrentlyWaitingCount()).isZero();
 		assertThat(metrics.getTotalAllocated()).isZero();
 		assertThat(metrics.getTotalClaimed()).isZero();
 	}

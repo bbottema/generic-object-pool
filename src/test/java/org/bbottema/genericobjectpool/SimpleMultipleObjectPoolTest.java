@@ -42,7 +42,7 @@ public class SimpleMultipleObjectPoolTest {
 		
 		// Make sure we are fully Allocated
 		PoolMetrics metrics = pool2.getPoolMetrics();
-		assertThat(metrics.getAllocationSize()).isEqualTo(MAX_ITEMS_PER_KEY);
+		assertThat(metrics.getCurrentlyAllocated()).isEqualTo(MAX_ITEMS_PER_KEY);
 		assertThat(metrics.getTotalAllocated()).isEqualTo(MAX_ITEMS_PER_KEY);
 		assertThat(metrics.getTotalClaimed()).isEqualTo(MAX_ITEMS_PER_KEY + MAX_ITEMS_PER_KEY);
 		
@@ -50,7 +50,7 @@ public class SimpleMultipleObjectPoolTest {
 		ExecutionContext executionContext2 = ExecutionContext.builder().failIfUnableToClaim(true).reusable(false).sleepTime(20).build();
 		executeAndWait(createThreadedExecution(pool2, MAX_ITEMS_PER_KEY, executionContext2), executionContext2);
 		metrics = pool1.getPoolMetrics();
-		assertThat(metrics.getAllocationSize()).isZero();
+		assertThat(metrics.getCurrentlyAllocated()).isZero();
 		assertThat(metrics.getTotalAllocated()).isZero();
 		assertThat(metrics.getTotalClaimed()).isZero();
 	}
@@ -76,7 +76,7 @@ public class SimpleMultipleObjectPoolTest {
 		assertThat(context.getTimeoutCount().get()).isZero();
 
 		PoolMetrics metrics = pool2.getPoolMetrics();
-		assertThat(metrics.getAllocationSize()).isEqualTo(MAX_ITEMS_PER_KEY);
+		assertThat(metrics.getCurrentlyAllocated()).isEqualTo(MAX_ITEMS_PER_KEY);
 		assertThat(metrics.getTotalAllocated()).isEqualTo(MAX_ITEMS_PER_KEY);
 		assertThat(metrics.getTotalClaimed()).isEqualTo(MAX_ITEMS_PER_KEY + claimExtraCount);
 	}
@@ -87,8 +87,8 @@ public class SimpleMultipleObjectPoolTest {
 
 		PoolMetrics metrics = pool1.getPoolMetrics();
 		assertThat(metrics).isNotNull();
-		assertThat(metrics.getClaimedCount()).isZero();
-		assertThat(metrics.getWaitingCount()).isZero();
+		assertThat(metrics.getCurrentlyClaimed()).isZero();
+		assertThat(metrics.getCurrentlyWaitingCount()).isZero();
 		assertThat(metrics.getTotalAllocated()).isEqualTo(0);
 		assertThat(metrics.getTotalClaimed()).isEqualTo(0);
 	}
@@ -155,7 +155,7 @@ public class SimpleMultipleObjectPoolTest {
 				fail("Unable to claim object : " + e.getMessage(), e);
 			} else {
 				final PoolMetrics metrics = pool.getPoolMetrics();
-				assertThat(metrics.getClaimedCount()).isEqualTo(MAX_ITEMS_PER_KEY);
+				assertThat(metrics.getCurrentlyClaimed()).isEqualTo(MAX_ITEMS_PER_KEY);
 				assertThat(metrics.getTotalAllocated()).isEqualTo(MAX_ITEMS_PER_KEY);
 				assertThat(metrics.getTotalClaimed()).isEqualTo(MAX_ITEMS_PER_KEY);
 			}

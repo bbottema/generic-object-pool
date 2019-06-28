@@ -152,9 +152,9 @@ public class TestApi {
     
     private void assertAllMetricsZero(GenericObjectPool<AtomicReference<Integer>> pool, long expectedTotalAllocated, long expectedTotalClaimed) {
         final PoolMetrics poolMetrics = pool.getPoolMetrics();
-        assertThat(poolMetrics.getClaimedCount()).isZero();
-        assertThat(poolMetrics.getAllocationSize()).isZero();
-        assertThat(poolMetrics.getWaitingCount()).isZero();
+        assertThat(poolMetrics.getCurrentlyClaimed()).isZero();
+        assertThat(poolMetrics.getCurrentlyAllocated()).isZero();
+        assertThat(poolMetrics.getCurrentlyWaitingCount()).isZero();
         assertThat(poolMetrics.getTotalAllocated()).isEqualTo(expectedTotalAllocated);
         assertThat(poolMetrics.getTotalClaimed()).isEqualTo(expectedTotalClaimed);
     }
