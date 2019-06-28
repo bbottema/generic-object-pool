@@ -122,8 +122,19 @@ static class FooAllocator extends Allocator<Foo> {
 }
 ```
 
-If for some reason you need to have more control over how threads are created, you can provide you own ThreadFactory:
+Getting metrics at any point during the pool's existence:
+```java
+PoolMetrics metrics = pool.getPoolMetrics();
+metrics.getCurrentlyClaimed(); // currently claimed by threads and not released yet
+metrics.getCurrentlyWaitingCount(); // currently waiting threads that want to claim
+metrics.getCorePoolsize(); // number of instances to auto allocated (eager loading)
+metrics.getMaxPoolsize(); // max number of objects allowed at all times
+metrics.getCurrentlyAllocated(); // available + claimed objects
+metrics.getTotalAllocated(); // total number of allocations during pool's existence
+metrics.getTotalClaimed(); // total number of claims during pool's existence
+```
 
+If for some reason you need to have more control over how threads are created, you can provide you own ThreadFactory:
 ```java
 PoolConfig<Foo> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
    .threadFactory(new MyCustomThreadFactory())
