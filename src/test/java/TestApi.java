@@ -1,12 +1,13 @@
 import lombok.RequiredArgsConstructor;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
-import org.jetbrains.annotations.NotNull;
-import org.junit.Test;
 import org.bbottema.genericobjectpool.Allocator;
 import org.bbottema.genericobjectpool.PoolConfig;
 import org.bbottema.genericobjectpool.PoolMetrics;
 import org.bbottema.genericobjectpool.PoolableObject;
 import org.bbottema.genericobjectpool.SimpleObjectPool;
+import org.bbottema.genericobjectpool.expirypolicies.TimeoutSinceLastAllocationExpirationPolicy;
+import org.jetbrains.annotations.NotNull;
+import org.junit.Test;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,7 +25,10 @@ public class TestApi {
     
     @Test
     public void testPublicAPI() throws Exception {
-        SimpleObjectPool<AtomicReference<Integer>> pool = new SimpleObjectPool<>(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(3).build(), new MyAllocator());
+        final PoolConfig<AtomicReference<Integer>> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
+                .maxPoolsize(3)
+                .build();
+        SimpleObjectPool<AtomicReference<Integer>> pool = new SimpleObjectPool<>(poolConfig, new MyAllocator());
         
         PoolableObject<AtomicReference<Integer>> obj1 = pool.claim();
         PoolableObject<AtomicReference<Integer>> obj2 = pool.claim();
@@ -165,6 +169,7 @@ public class TestApi {
         private AtomicInteger counter = new AtomicInteger();
 
         @NotNull
+        @Override
         public AtomicReference<Integer> allocate() {
             return new AtomicReference<>(counter.incrementAndGet());
         }

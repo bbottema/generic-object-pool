@@ -17,16 +17,16 @@ public abstract class Allocator<T> {
 	protected abstract T allocate();
 	
 	/**
-	 * Reinitialize an object to be returned as available again.
+	 * Uninitialize an instance which has been released back to the pool, until it is claimed again.
 	 */
-	protected void allocateForReuse(@NotNull T object) {
+	protected void deallocateForReuse(@NotNull T object) {
 		// overridable hook
 	}
 	
 	/**
-	 * Uninitialize an instance which has been released back to the pool.
+	 * Reinitialize an object so it is ready to be claimed.
 	 */
-	protected void deallocateForReuse(@NotNull T object) {
+	protected void allocateForReuse(@NotNull T object) {
 		// overridable hook
 	}
 	
