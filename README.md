@@ -80,9 +80,9 @@ static class FooAllocator extends Allocator<Foo> {
 	 * Initial creation and initialization. Called when claim comes or when pool is eagerly loading for core size.
 	 */
 	@Override
-    public AtomicReference<Integer> allocate() {
-        return new Foo();
-    }
+	public AtomicReference<Integer> allocate() {
+		return new Foo();
+	}
 }
 ```
 
@@ -93,9 +93,9 @@ static class FooAllocator extends Allocator<Foo> {
 	 * Initial creation and initialization. Called when claim comes or when pool is eagerly loading for core size.
 	 */
 	@Override
-    public AtomicReference<Integer> allocate() {
-        return new Foo();
-    }
+	public AtomicReference<Integer> allocate() {
+		return new Foo();
+	}
 	
 	/**
 	 * Uninitialize an instance which has been released back to the pool, until it is claimed again.
