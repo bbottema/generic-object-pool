@@ -36,6 +36,7 @@ GenericObjectPool<Foo> pool = new SimpleObjectPool<>(poolConfig, new MyFooAlloca
 PoolConfig<Foo> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
    .corePoolsize(20) // keeps 20 objects eagerly allocated at all times
    .maxPoolsize(20)
+   // deallocate after 30 seconds, but every time an object is claimed the expiry timeout is reset
    .expirationPolicy(new TimeoutSinceLastAllocationExpirationPolicy<Foo>(30, TimeUnit.SECONDS))
    .build();
 
