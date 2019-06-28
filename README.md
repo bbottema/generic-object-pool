@@ -150,6 +150,6 @@ PoolConfig<Foo> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
    .build();
 ```
 
-### Other Expiry strategies
+#### Other Expiry strategies
 
 ...
