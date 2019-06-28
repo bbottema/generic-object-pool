@@ -24,7 +24,7 @@ public class TestApi {
     
     @Test
     public void testPublicAPI() throws Exception {
-        SimpleObjectPool<AtomicReference<Integer>> pool = new SimpleObjectPool<>(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(3).build(), new MyFactory());
+        SimpleObjectPool<AtomicReference<Integer>> pool = new SimpleObjectPool<>(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(3).build(), new MyAllocator());
         
         PoolableObject<AtomicReference<Integer>> obj1 = pool.claim();
         PoolableObject<AtomicReference<Integer>> obj2 = pool.claim();
@@ -52,7 +52,7 @@ public class TestApi {
     
     @Test
     public void testShutdownWithWaitingThreads() throws Exception {
-        final SimpleObjectPool<AtomicReference<Integer>> pool = new SimpleObjectPool<>(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(1).build(), new MyFactory());
+        final SimpleObjectPool<AtomicReference<Integer>> pool = new SimpleObjectPool<>(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(1).build(), new MyAllocator());
         
         ExecutorService es = Executors.newSingleThreadExecutor();
         
@@ -98,7 +98,7 @@ public class TestApi {
     
     @Test
     public void testShutdownWithAvailableObjects() throws Exception {
-        final SimpleObjectPool<AtomicReference<Integer>> pool = new SimpleObjectPool<>(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(2).build(), new MyFactory());
+        final SimpleObjectPool<AtomicReference<Integer>> pool = new SimpleObjectPool<>(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(2).build(), new MyAllocator());
         
         ExecutorService es = Executors.newSingleThreadExecutor();
         
@@ -161,7 +161,7 @@ public class TestApi {
         return claimer1Ref;
     }
     
-    static class MyFactory extends Allocator<AtomicReference<Integer>> {
+    static class MyAllocator extends Allocator<AtomicReference<Integer>> {
         private AtomicInteger counter = new AtomicInteger();
 
         @NotNull
