@@ -90,7 +90,8 @@ More comprehensive life cycle management:
 ```java
 static class FooAllocator extends Allocator<Foo> {
 	/**
-	 * Initial creation and initialization. Called when claim comes or when pool is eagerly loading for core size.
+	 * Initial creation and initialization. <br/>
+	 * Called when claim comes or when pool is eagerly loading for core size.
 	 */
 	@Override
 	public AtomicReference<Integer> allocate() {
