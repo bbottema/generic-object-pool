@@ -3,7 +3,6 @@
 GOP is a lightweight generic object pool, providing object lifecycle management, metrics, claim / release mechanism and object invalidation, as well as auto initialize a core pool and auto expiry 
 policies.
 
-### About
 [API Documentation](https://www.javadoc.io/doc/com.github.bbottema/generic-object-pool/1.0.0)
 
 ### Setup
@@ -121,4 +120,12 @@ static class FooAllocator extends Allocator<Foo> {
 		object.clear();
 	}
 }
+```
+
+If for some reason you need to have more control over how threads are created, you can provide you own ThreadFactory:
+
+```java
+PoolConfig<Foo> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
+   .threadFactory(new MyCustomThreadFactory())
+   .build();
 ```
