@@ -9,12 +9,11 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
@@ -28,7 +27,6 @@ public class GenericObjectPool<T> {
 	
 	@NotNull private final Lock lock = new ReentrantLock();
 	@NotNull private final LinkedList<PoolableObject<T>> available = new LinkedList<>();
-	private final Set<PoolableObject<T>> claimed = new HashSet<>();
 	@NotNull private final LinkedList<PoolableObject<T>> waitingForDeallocation = new LinkedList<>();
 	@NotNull private final LinkedList<Condition> objectAvailableConditions = new LinkedList<>();
 	
@@ -37,6 +35,7 @@ public class GenericObjectPool<T> {
 	
 	@Nullable private volatile Future<?> shutdownSequence;
 	
+	@NotNull private final AtomicInteger currentlyClaimed = new AtomicInteger();
 	@NotNull private final AtomicLong totalAllocated = new AtomicLong();
 	@NotNull private final AtomicLong totalClaimed = new AtomicLong();
 	
@@ -87,7 +86,7 @@ public class GenericObjectPool<T> {
 				invalidatePoolableObject(claimedObject);
 			} else if (claimedObject.getCurrentPoolStatus() == PoolableObject.PoolStatus.CLAIMED) {
 				allocator.deallocateForReuse(claimedObject.getAllocatedObject());
-				claimed.remove(claimedObject);
+				currentlyClaimed.decrementAndGet();
 				available.addFirst(claimedObject);
 				claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.AVAILABLE);
 
@@ -105,7 +104,7 @@ public class GenericObjectPool<T> {
 		lock.lock();
 		try {
 			if (claimedObject.getCurrentPoolStatus() == PoolableObject.PoolStatus.CLAIMED) {
-				claimed.remove(claimedObject);
+				currentlyClaimed.decrementAndGet();
 			} else if (claimedObject.getCurrentPoolStatus() == PoolableObject.PoolStatus.AVAILABLE) {
 				available.remove(claimedObject);
 			}
@@ -142,12 +141,12 @@ public class GenericObjectPool<T> {
 			allocator.allocateForReuse(claimedObject.getAllocatedObject());
 			claimedObject.resetAllocationTimestamp();
 			claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.CLAIMED);
-			claimed.add(claimedObject);
+			currentlyClaimed.incrementAndGet();
 			totalClaimed.incrementAndGet();
 		} else if (getCurrentlyAllocated() < poolConfig.getMaxPoolsize()) {
 			claimedObject = new PoolableObject<>(this, allocator.allocate());
 			claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.CLAIMED);
-			claimed.add(claimedObject);
+			currentlyClaimed.incrementAndGet();
 			totalAllocated.incrementAndGet();
 			totalClaimed.incrementAndGet();
 		}
@@ -197,7 +196,7 @@ public class GenericObjectPool<T> {
 	 */
 	@SuppressWarnings("WeakerAccess")
 	public int getCurrentlyAllocated() {
-		return available.size() + claimed.size();
+		return available.size() + currentlyClaimed.get();
 	}
 
 	/**
@@ -208,7 +207,7 @@ public class GenericObjectPool<T> {
 		lock.lock();
 		try {
 			return new PoolMetrics(
-					claimed.size(),
+					currentlyClaimed.get(),
 					objectAvailableConditions.size(),
 					getCurrentlyAllocated(),
 					poolConfig.getCorePoolsize(),
@@ -323,7 +322,7 @@ public class GenericObjectPool<T> {
 		}
 		
 		private void waitUntilShutDown() {
-			while (claimed.size() > 0 ||
+			while (currentlyClaimed.get() > 0 ||
 					objectAvailableConditions.size() > 0 ||
 					available.size() > 0 ||
 					waitingForDeallocation.size() > 0) {
