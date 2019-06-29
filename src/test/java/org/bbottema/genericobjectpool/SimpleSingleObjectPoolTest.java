@@ -29,9 +29,6 @@ public class SimpleSingleObjectPoolTest {
 		singleClaimAndRelease();
 
 		PoolableObject<String> obj = pool2.claim();
-		if (obj == null) {
-			throw new TimeoutException();
-		}
 		try {
 			ExecutorService es = Executors.newSingleThreadExecutor();
 			Future<?> f = es.submit(new Runnable() {
@@ -141,14 +138,8 @@ public class SimpleSingleObjectPoolTest {
 		GenericObjectPool<Boolean> pool = new GenericObjectPool<>(PoolConfig.<Boolean>builder().maxPoolsize(1).build(), allocator);
 
 		PoolableObject<Boolean> obj = pool.claim();
-		if (obj == null) {
-			throw new TimeoutException();
-		}
 		obj.release();
 		obj = pool.claim();
-		if (obj == null) {
-			throw new TimeoutException();
-		}
 		obj.invalidate();
 		
 		assertThat(allocator.lifecycleCount).isEqualTo(3);

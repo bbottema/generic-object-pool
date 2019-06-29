@@ -20,6 +20,7 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.Executors.newSingleThreadExecutor;
 
 @Slf4j
@@ -48,9 +49,10 @@ public class GenericObjectPool<T> {
 	/**
 	 * Delegates to {@link #claim(Timeout)} with unlimited timeout.
 	 */
-	@Nullable
+	@NotNull
+	@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "False positive")
 	public PoolableObject<T> claim() throws InterruptedException {
-		return claim(new Timeout(Long.MAX_VALUE, TimeUnit.DAYS));
+		return requireNonNull(claim(new Timeout(Long.MAX_VALUE, TimeUnit.DAYS)));
 	}
 	
 	/**
