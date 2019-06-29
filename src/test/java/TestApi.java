@@ -1,10 +1,11 @@
 import lombok.RequiredArgsConstructor;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.bbottema.genericobjectpool.Allocator;
+import org.bbottema.genericobjectpool.GenericObjectPool;
 import org.bbottema.genericobjectpool.PoolConfig;
 import org.bbottema.genericobjectpool.PoolMetrics;
 import org.bbottema.genericobjectpool.PoolableObject;
-import org.bbottema.genericobjectpool.GenericObjectPool;
+import org.bbottema.genericobjectpool.expirypolicies.TimeoutSinceCreationExpirationPolicy;
 import org.jetbrains.annotations.NotNull;
 import org.junit.Test;
 
@@ -93,7 +94,7 @@ public class TestApi {
         assertThat(shutdownResult).isDone();
         
         // verify the object was deallocated
-        assertThat(claimedPoolable1.get().getAllocatedObject()).isNull();
+        assertDeallocated(claimedPoolable1);
         assertThat(claimedPoolable2.get()).isNull();
     
         assertAllMetricsZero(pool, 1, 1);
@@ -135,7 +136,7 @@ public class TestApi {
         assertThat(claimer2Ref.get()).as("claimer2").isDone();
     
         assertThat(shutdownResult).isNotDone();
-        assertThat(poolableObj1.getAllocatedObject()).isNull();
+        assertDeallocated(claimedPoolable1);
         assertThat(poolableObj2.getAllocatedObject()).isNotNull();
         
         poolableObj2.release();
@@ -144,8 +145,8 @@ public class TestApi {
         assertThat(shutdownResult).isDone();
         
         // verify the object was deallocated
-        assertThat(poolableObj1.getAllocatedObject()).isNull();
-        assertThat(poolableObj2.getAllocatedObject()).isNull();
+        assertDeallocated(claimedPoolable1);
+        assertDeallocated(claimedPoolable2);
     
         assertAllMetricsZero(pool, 2, 2);
     }
@@ -202,5 +203,85 @@ public class TestApi {
         public void call() throws Throwable {
             shutdownResult.get(timeout, timeUnit);
         }
+    }
+    
+    @Test
+    public void testLazyLoading() throws InterruptedException {
+        final PoolConfig<AtomicReference<Integer>> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
+                .maxPoolsize(3).build();
+        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
+        
+        TimeUnit.MILLISECONDS.sleep(50);
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isZero();
+        pool.claim();
+        TimeUnit.MILLISECONDS.sleep(50);
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(1);
+        pool.claim();
+        TimeUnit.MILLISECONDS.sleep(50);
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
+        assertThat(pool.getPoolMetrics().getTotalClaimed()).isEqualTo(2);
+    }
+    
+    @Test
+    public void testEagerLoading() throws InterruptedException {
+        final PoolConfig<AtomicReference<Integer>> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
+                .corePoolsize(2)
+                .maxPoolsize(3).build();
+        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
+        
+        TimeUnit.MILLISECONDS.sleep(50);
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
+        PoolableObject<AtomicReference<Integer>> claim1 = requireNonNull(pool.claim());
+        TimeUnit.MILLISECONDS.sleep(50);
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
+        PoolableObject<AtomicReference<Integer>> claim2 = requireNonNull(pool.claim());
+        TimeUnit.MILLISECONDS.sleep(50);
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
+        PoolableObject<AtomicReference<Integer>> claim3 = requireNonNull(pool.claim());
+        TimeUnit.MILLISECONDS.sleep(50);
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(3);
+        
+        claim1.release();
+        claim2.release();
+        claim3.release();
+        TimeUnit.MILLISECONDS.sleep(50);
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(3);
+        claim1.invalidate();
+        claim2.invalidate();
+        claim3.invalidate();
+        TimeUnit.MILLISECONDS.sleep(50);
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
+        assertThat(pool.getPoolMetrics().getTotalAllocated()).isEqualTo(5);
+        assertThat(pool.getPoolMetrics().getTotalClaimed()).isEqualTo(3);
+    }
+    
+    @Test
+    public void testEagerLoadingWithExpiry() throws InterruptedException {
+        final PoolConfig<AtomicReference<Integer>> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
+                .corePoolsize(2)
+                .maxPoolsize(3)
+                .expirationPolicy(new TimeoutSinceCreationExpirationPolicy<AtomicReference<Integer>>(40, TimeUnit.MILLISECONDS))
+                .build();
+        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
+        
+        TimeUnit.MILLISECONDS.sleep(60);
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
+        TimeUnit.MILLISECONDS.sleep(55);
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
+        TimeUnit.MILLISECONDS.sleep(55);
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
+    
+        assertThat(pool.getPoolMetrics().getTotalAllocated()).isEqualTo(6);
+        assertThat(pool.getPoolMetrics().getTotalClaimed()).isZero();
+    }
+    
+    private void assertDeallocated(final AtomicReference<PoolableObject<AtomicReference<Integer>>> claimedPoolable1) {
+        assertThatThrownBy(new ThrowingCallable() {
+            @Override
+            public void call() {
+                @SuppressWarnings("unused") AtomicReference<Integer> obj = claimedPoolable1.get().getAllocatedObject();
+            }
+        })
+                .isInstanceOf(ClassCastException.class);
     }
 }

@@ -3,6 +3,8 @@ package org.bbottema.genericobjectpool;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.bbottema.genericobjectpool.util.SleepUtil;
+import org.bbottema.genericobjectpool.util.Timeout;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -18,7 +20,6 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.Executors.newSingleThreadExecutor;
 
 @Slf4j
@@ -45,11 +46,19 @@ public class GenericObjectPool<T> {
 	}
 	
 	/**
-	 * Delegates to {@link #claim(long, TimeUnit)} with unlimited timeout.
+	 * Delegates to {@link #claim(Timeout)} with unlimited timeout.
 	 */
 	@Nullable
 	public PoolableObject<T> claim() throws InterruptedException {
-		return claim(Long.MAX_VALUE, TimeUnit.DAYS);
+		return claim(new Timeout(Long.MAX_VALUE, TimeUnit.DAYS));
+	}
+	
+	/**
+	 * Delegates to {@link #claim(Timeout)}.
+	 */
+	@Nullable
+	public PoolableObject<T> claim(final long timeout, final TimeUnit timeUnit) throws InterruptedException {
+		return claim(new Timeout(timeout, timeUnit));
 	}
 	
 	/**
@@ -58,24 +67,24 @@ public class GenericObjectPool<T> {
 	 * @throws IllegalStateException if you try a new claim while the pool is shut down
 	 * @throws InterruptedException  if the pool was waiting and the pool shut down in the mean time
 	 */
+	@SuppressWarnings("WeakerAccess")
 	@Nullable
-	public PoolableObject<T> claim(long timeout, @NotNull TimeUnit unit) throws InterruptedException, IllegalStateException {
+	public PoolableObject<T> claim(final @NotNull Timeout timeout) throws InterruptedException, IllegalStateException {
 		lock.lock();
 		try {
-			return claimOrCreateOrWaitUntilAvailable(unit.toMillis(timeout));
+			return claimOrCreateOrWaitUntilAvailable(timeout);
 		} finally {
 			lock.unlock();
 		}
 	}
 
-	@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "False positive")
 	void releasePoolableObject(@NotNull final PoolableObject<T> claimedObject) {
 		lock.lock();
 		try {
 			if (isShuttingDown()) {
 				invalidatePoolableObject(claimedObject);
 			} else if (claimedObject.getCurrentPoolStatus() == PoolableObject.PoolStatus.CLAIMED) {
-				allocator.deallocateForReuse(requireNonNull(claimedObject.getAllocatedObject()));
+				allocator.deallocateForReuse(claimedObject.getAllocatedObject());
 				claimed.remove(claimedObject);
 				available.addFirst(claimedObject);
 				claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.AVAILABLE);
@@ -108,7 +117,7 @@ public class GenericObjectPool<T> {
 	}
 	
 	@Nullable
-	private PoolableObject<T> claimOrCreateOrWaitUntilAvailable(final long timeoutMs) throws InterruptedException, IllegalStateException {
+	private PoolableObject<T> claimOrCreateOrWaitUntilAvailable(final @NotNull Timeout timeout) throws InterruptedException, IllegalStateException {
 		PoolableObject<T> entry;
 		/*
 		 *	Try to claim an object or else wait for one to become available and then try again
@@ -120,16 +129,15 @@ public class GenericObjectPool<T> {
 				throw new IllegalStateException("Pool has been shutdown");
 			}
 			entry = claimOrCreateNewObjectIfSpaceLeft();
-		} while (entry == null && waitForAvailableObjectOrTimeout(timeoutMs));
+		} while (entry == null && waitForAvailableObjectOrTimeout(timeout));
 		return entry;
 	}
 	
 	@Nullable
-	@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "False positive")
 	private PoolableObject<T> claimOrCreateNewObjectIfSpaceLeft() {
 		PoolableObject<T> claimedObject = !available.isEmpty() ? available.remove() : null;
 		if (claimedObject != null) {
-			allocator.allocateForReuse(requireNonNull(claimedObject.getAllocatedObject()));
+			allocator.allocateForReuse(claimedObject.getAllocatedObject());
 			claimedObject.resetAllocationTimestamp();
 			claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.CLAIMED);
 			claimed.add(claimedObject);
@@ -148,16 +156,16 @@ public class GenericObjectPool<T> {
 	 * Adds the current PoolWaitHelper into the waiting list.  The waitingClaimer will wait up until the specified deadline.  If the waitingClaimer is woken up before the specified deadline then true is returned
 	 * otherwise false.  The waitingClaimer will always be removed from the wait list regardless of the outcome.
 	 *
-	 * @param timeoutMs the max timeout to wait for
+	 * @param timeout the max timeout to wait for
 	 *
 	 * @return true if object became available
 	 * @throws InterruptedException the interrupted exception
 	 */
-	private boolean waitForAvailableObjectOrTimeout(final long timeoutMs) throws InterruptedException {
+	private boolean waitForAvailableObjectOrTimeout(final @NotNull Timeout timeout) throws InterruptedException {
 		final Condition objectAvailability = lock.newCondition();
 		try {
 			objectAvailableConditions.add(objectAvailability);
-			final boolean await = objectAvailability.await(timeoutMs, TimeUnit.MILLISECONDS);
+			final boolean await = objectAvailability.await(timeout.getDuration(), timeout.getTimeUnit());
 			if (isShuttingDown()) {
 				throw new InterruptedException("Pool is shutting down");
 			}
@@ -249,9 +257,8 @@ public class GenericObjectPool<T> {
 			SleepUtil.sleep(isShuttingDown() ? 0 : deallocatedAnObject ? 50 : 10);
 		}
 
-		@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "False positive")
 		private void deallocate(@NotNull final PoolableObject<T> invalidatedObject) {
-			allocator.deallocate(requireNonNull(invalidatedObject.getAllocatedObject()));
+			allocator.deallocate(invalidatedObject.getAllocatedObject());
 			invalidatedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.DEALLOCATED);
 			invalidatedObject.dereferenceObject();
 		}

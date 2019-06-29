@@ -14,26 +14,26 @@ public abstract class Allocator<T> {
 	 * @return A new Object to be inserted into the Pool.
 	 */
 	@NotNull
-	protected abstract T allocate();
+	public abstract T allocate();
 	
 	/**
 	 * Uninitialize an instance which has been released back to the pool, until it is claimed again.
 	 */
-	protected void deallocateForReuse(@NotNull T object) {
+	public void deallocateForReuse(@NotNull T object) {
 		// overridable hook
 	}
 	
 	/**
 	 * Reinitialize an object so it is ready to be claimed.
 	 */
-	protected void allocateForReuse(@NotNull T object) {
+	public void allocateForReuse(@NotNull T object) {
 		// overridable hook
 	}
 	
 	/**
 	 * Clean up an object no longer needed by the pool.
 	 */
-	protected void deallocate(@NotNull T object) {
+	public void deallocate(@NotNull T object) {
 		// overridable hook
 	}
 }

@@ -18,7 +18,7 @@ import static org.bbottema.genericobjectpool.PoolableObject.PoolStatus.AVAILABLE
  */
 @ToString
 public class PoolableObject<T> {
-
+	
 	enum PoolStatus {
 		AVAILABLE, CLAIMED, WAITING_FOR_DEALLOCATION, DEALLOCATED
 	}
@@ -34,7 +34,7 @@ public class PoolableObject<T> {
 	 *     <li>null, in case the object was invalidated and consequently fully deallocated or when the pool shutting down</li>
 	 * </ul>
 	 */
-	@Getter @Nullable private T allocatedObject;
+	@Getter @NotNull private T allocatedObject;
 	@Getter private final Date createdOn = new Date();
 	/**
 	 * Millisecond stamp from {@link System#currentTimeMillis()}, similar to {@link #getCreatedOn()}.
@@ -71,14 +71,6 @@ public class PoolableObject<T> {
 		pool.invalidatePoolableObject(this);
 	}
 	
-	/**
-	 * Used internally to make sure that when shutting down the pool, no poolable object still references an
-	 * object even if the user still keeps the Poolable object somewhere.
-	 */
-	void dereferenceObject() {
-		allocatedObject = null;
-	}
-	
 	void resetAllocationTimestamp() {
 		allocationStampMs = System.currentTimeMillis();
 	}
@@ -94,8 +86,16 @@ public class PoolableObject<T> {
 	/**
 	 * @return The numbers of milliseconds since this object was allocated last.
 	 */
-	@SuppressWarnings("WeakerAccess")
 	public long allocationAgeMs() {
 		return System.currentTimeMillis() -  allocationStampMs;
+	}
+	
+	@SuppressWarnings("unchecked")
+	void dereferenceObject() {
+		allocatedObject = (T) ObjectDeallocated.INSTANCE;
+	}
+	
+	public static class ObjectDeallocated {
+		public static final ObjectDeallocated INSTANCE = new ObjectDeallocated();
 	}
 }

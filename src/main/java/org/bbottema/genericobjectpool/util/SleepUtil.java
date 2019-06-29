@@ -1,10 +1,10 @@
-package org.bbottema.genericobjectpool;
+package org.bbottema.genericobjectpool.util;
 
 import lombok.experimental.UtilityClass;
 
 @UtilityClass
-final class SleepUtil {
-	static void sleep(final int durationMs) {
+public final class SleepUtil {
+	public static void sleep(final int durationMs) {
 		try {
 			Thread.sleep(durationMs);
 		} catch (InterruptedException e) {
