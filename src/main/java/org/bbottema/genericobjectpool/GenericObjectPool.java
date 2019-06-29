@@ -3,6 +3,7 @@ package org.bbottema.genericobjectpool;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.bbottema.genericobjectpool.util.ForeverTimeout;
 import org.bbottema.genericobjectpool.util.SleepUtil;
 import org.bbottema.genericobjectpool.util.Timeout;
 import org.jetbrains.annotations.NotNull;
@@ -21,6 +22,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.Executors.newSingleThreadExecutor;
+import static org.bbottema.genericobjectpool.util.ForeverTimeout.WAIT_FOREVER;
 
 @Slf4j
 public class GenericObjectPool<T> {
@@ -51,7 +53,7 @@ public class GenericObjectPool<T> {
 	@NotNull
 	@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "False positive")
 	public PoolableObject<T> claim() throws InterruptedException {
-		return requireNonNull(claim(new Timeout(Long.MAX_VALUE, TimeUnit.DAYS)));
+		return requireNonNull(claim(WAIT_FOREVER));
 	}
 	
 	/**
@@ -87,7 +89,7 @@ public class GenericObjectPool<T> {
 			} else if (claimedObject.getCurrentPoolStatus() == PoolableObject.PoolStatus.CLAIMED) {
 				allocator.deallocateForReuse(claimedObject.getAllocatedObject());
 				currentlyClaimed.decrementAndGet();
-				available.addFirst(claimedObject);
+				available.addLast(claimedObject);
 				claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.AVAILABLE);
 
 				Condition waitingClaimer = objectAvailableConditions.poll();
@@ -136,7 +138,7 @@ public class GenericObjectPool<T> {
 	
 	@Nullable
 	private PoolableObject<T> claimOrCreateNewObjectIfSpaceLeft() {
-		PoolableObject<T> claimedObject = !available.isEmpty() ? available.remove() : null;
+		PoolableObject<T> claimedObject = !available.isEmpty() ? available.removeFirst() : null;
 		if (claimedObject != null) {
 			allocator.allocateForReuse(claimedObject.getAllocatedObject());
 			claimedObject.resetAllocationTimestamp();
@@ -242,7 +244,7 @@ public class GenericObjectPool<T> {
 			lock.lock();
 			try {
 				while (getCurrentlyAllocated() < poolConfig.getCorePoolsize() && !isShuttingDown()) {
-					available.add(new PoolableObject<>(GenericObjectPool.this, allocator.allocate()));
+					available.addLast(new PoolableObject<>(GenericObjectPool.this, allocator.allocate()));
 					totalAllocated.incrementAndGet();
 				}
 				if (!waitingForDeallocation.isEmpty()) {
