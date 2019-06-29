@@ -279,9 +279,9 @@ public class TestApi {
         assertThatThrownBy(new ThrowingCallable() {
             @Override
             public void call() {
-                @SuppressWarnings("unused") AtomicReference<Integer> obj = claimedPoolable1.get().getAllocatedObject();
+                claimedPoolable1.get().getAllocatedObject();
             }
         })
-                .isInstanceOf(ClassCastException.class);
+                .isInstanceOf(IllegalStateException.class);
     }
 }

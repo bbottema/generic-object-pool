@@ -10,6 +10,7 @@ import java.util.Date;
 
 import static lombok.AccessLevel.PACKAGE;
 import static org.bbottema.genericobjectpool.PoolableObject.PoolStatus.AVAILABLE;
+import static org.bbottema.genericobjectpool.PoolableObject.PoolStatus.DEALLOCATED;
 
 /**
  * A Object Pool Entry which wraps the underlying claimed Object as V.
@@ -34,7 +35,7 @@ public class PoolableObject<T> {
 	 *     <li>null, in case the object was invalidated and consequently fully deallocated or when the pool shutting down</li>
 	 * </ul>
 	 */
-	@Getter @NotNull private T allocatedObject;
+	@NotNull private T allocatedObject;
 	@Getter private final Date createdOn = new Date();
 	/**
 	 * Millisecond stamp from {@link System#currentTimeMillis()}, similar to {@link #getCreatedOn()}.
@@ -96,6 +97,14 @@ public class PoolableObject<T> {
 	}
 	
 	public static class ObjectDeallocated {
-		public static final ObjectDeallocated INSTANCE = new ObjectDeallocated();
+		static final ObjectDeallocated INSTANCE = new ObjectDeallocated();
+	}
+	
+	@NotNull
+	public T getAllocatedObject() {
+		if (currentPoolStatus == DEALLOCATED) {
+			throw new IllegalStateException("This object has already been deallocated, you can't use it anymore!");
+		}
+		return allocatedObject;
 	}
 }
