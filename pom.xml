@@ -7,7 +7,7 @@
 	<artifactId>generic-object-pool</artifactId>
 	<packaging>jar</packaging>
 	<name>generic-object-pool</name>
-	<version>0.0.1</version>
+	<version>1.0.0</version>
 	<description>Flexible thread-safe generic object pool</description>
 	<url>http:///github.com/bbottema/generic-object-pool</url>
 
