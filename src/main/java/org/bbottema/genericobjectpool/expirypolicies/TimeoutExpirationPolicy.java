@@ -21,7 +21,7 @@ abstract class TimeoutExpirationPolicy<T> implements ExpirationPolicy<T> {
 	}
 	
 	@Override
-	public final boolean hasExpired(PoolableObject<T> poolableObject) {
+	public final boolean hasExpired(@NotNull PoolableObject<T> poolableObject) {
 		// not strictly nescesary, but might be useful to the end-user
 		if (poolableObject.getExpiryTimestamp() == null) {
 			poolableObject.setExpiryTimestamp(expiryAgeMs);

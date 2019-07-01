@@ -40,7 +40,7 @@ public class GenericObjectPool<T> {
 	@NotNull private final AtomicLong totalAllocated = new AtomicLong();
 	@NotNull private final AtomicLong totalClaimed = new AtomicLong();
 	
-	public GenericObjectPool(final PoolConfig<T> poolConfig, final Allocator<T> allocator) {
+	public GenericObjectPool(final PoolConfig<T> poolConfig, @NotNull final Allocator<T> allocator) {
 		this.poolConfig = poolConfig;
 		this.allocator = allocator;
 		poolConfig.getThreadFactory().newThread(new AutoAllocatorDeallocator()).start();

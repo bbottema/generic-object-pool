@@ -17,7 +17,7 @@ public class CombinedExpirationPolicies<T> implements ExpirationPolicy<T> {
 	private final Set<ExpirationPolicy<T>> expirationPolicies;
 	
 	@Override
-	public boolean hasExpired(PoolableObject<T> poolableObject) {
+	public boolean hasExpired(@NotNull PoolableObject<T> poolableObject) {
 		for (ExpirationPolicy<T> expirationPolicy : expirationPolicies) {
 			if (expirationPolicy.hasExpired(poolableObject)) {
 				return true;

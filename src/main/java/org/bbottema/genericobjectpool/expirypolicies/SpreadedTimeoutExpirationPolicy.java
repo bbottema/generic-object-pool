@@ -26,7 +26,7 @@ abstract class SpreadedTimeoutExpirationPolicy<T> implements ExpirationPolicy<T>
 	}
 	
 	@Override
-	public boolean hasExpired(PoolableObject<T> poolableObject) {
+	public boolean hasExpired(@NotNull PoolableObject<T> poolableObject) {
 		if (poolableObject.getExpiryTimestamp() == null) {
 			poolableObject.setExpiryTimestamp(lowerBoundMs + (long) (Math.random() * (upperBoundMs - lowerBoundMs)));
 		}

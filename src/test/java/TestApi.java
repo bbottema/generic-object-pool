@@ -168,7 +168,7 @@ public class TestApi {
     }
     
     static class MyAllocator extends Allocator<AtomicReference<Integer>> {
-        private AtomicInteger counter = new AtomicInteger();
+        private final AtomicInteger counter = new AtomicInteger();
 
         @NotNull
         @Override

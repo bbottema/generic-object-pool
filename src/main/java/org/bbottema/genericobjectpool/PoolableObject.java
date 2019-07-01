@@ -49,7 +49,7 @@ public class PoolableObject<T> {
 	 */
 	@NotNull @Getter(PACKAGE) @Setter(PACKAGE) private PoolStatus currentPoolStatus;
 	
-	PoolableObject(GenericObjectPool<T> pool, T allocatedObject) {
+	PoolableObject(GenericObjectPool<T> pool, @NotNull T allocatedObject) {
 		this.pool = pool;
 		this.allocatedObject = allocatedObject;
 		this.creationStampMs = System.currentTimeMillis();
@@ -96,7 +96,7 @@ public class PoolableObject<T> {
 		allocatedObject = (T) ObjectDeallocated.INSTANCE;
 	}
 	
-	public static class ObjectDeallocated {
+	static class ObjectDeallocated {
 		static final ObjectDeallocated INSTANCE = new ObjectDeallocated();
 	}
 	

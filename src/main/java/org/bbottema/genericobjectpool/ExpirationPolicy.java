@@ -22,7 +22,7 @@ public interface ExpirationPolicy<T> {
 		}
 		
 		@Override
-		public boolean hasExpired(PoolableObject<T> poolableObject) {
+		public boolean hasExpired(@NotNull PoolableObject<T> poolableObject) {
 			return false;
 		}
 	}
