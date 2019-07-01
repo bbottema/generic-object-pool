@@ -3,7 +3,6 @@ package org.bbottema.genericobjectpool;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.bbottema.genericobjectpool.util.ForeverTimeout;
 import org.bbottema.genericobjectpool.util.SleepUtil;
 import org.bbottema.genericobjectpool.util.Timeout;
 import org.jetbrains.annotations.NotNull;
@@ -41,7 +40,7 @@ public class GenericObjectPool<T> {
 	@NotNull private final AtomicLong totalAllocated = new AtomicLong();
 	@NotNull private final AtomicLong totalClaimed = new AtomicLong();
 	
-	public GenericObjectPool(@NotNull final PoolConfig<T> poolConfig, @NotNull final Allocator<T> allocator) {
+	public GenericObjectPool(final PoolConfig<T> poolConfig, final Allocator<T> allocator) {
 		this.poolConfig = poolConfig;
 		this.allocator = allocator;
 		poolConfig.getThreadFactory().newThread(new AutoAllocatorDeallocator()).start();
@@ -72,7 +71,7 @@ public class GenericObjectPool<T> {
 	 */
 	@SuppressWarnings("WeakerAccess")
 	@Nullable
-	public PoolableObject<T> claim(final @NotNull Timeout timeout) throws InterruptedException, IllegalStateException {
+	public PoolableObject<T> claim(final Timeout timeout) throws InterruptedException, IllegalStateException {
 		lock.lock();
 		try {
 			return claimOrCreateOrWaitUntilAvailable(timeout);
@@ -81,7 +80,7 @@ public class GenericObjectPool<T> {
 		}
 	}
 
-	void releasePoolableObject(@NotNull final PoolableObject<T> claimedObject) {
+	void releasePoolableObject(final PoolableObject<T> claimedObject) {
 		lock.lock();
 		try {
 			if (isShuttingDown()) {
@@ -102,7 +101,7 @@ public class GenericObjectPool<T> {
 		}
 	}
 
-	void invalidatePoolableObject(@NotNull final PoolableObject<T> claimedObject) {
+	void invalidatePoolableObject(final PoolableObject<T> claimedObject) {
 		lock.lock();
 		try {
 			if (claimedObject.getCurrentPoolStatus() == PoolableObject.PoolStatus.CLAIMED) {
@@ -120,7 +119,7 @@ public class GenericObjectPool<T> {
 	}
 	
 	@Nullable
-	private PoolableObject<T> claimOrCreateOrWaitUntilAvailable(final @NotNull Timeout timeout) throws InterruptedException, IllegalStateException {
+	private PoolableObject<T> claimOrCreateOrWaitUntilAvailable(final Timeout timeout) throws InterruptedException, IllegalStateException {
 		PoolableObject<T> entry;
 		/*
 		 *	Try to claim an object or else wait for one to become available and then try again
@@ -164,7 +163,7 @@ public class GenericObjectPool<T> {
 	 * @return true if object became available
 	 * @throws InterruptedException the interrupted exception
 	 */
-	private boolean waitForAvailableObjectOrTimeout(final @NotNull Timeout timeout) throws InterruptedException {
+	private boolean waitForAvailableObjectOrTimeout(final Timeout timeout) throws InterruptedException {
 		final Condition objectAvailability = lock.newCondition();
 		try {
 			objectAvailableConditions.add(objectAvailability);
@@ -260,7 +259,7 @@ public class GenericObjectPool<T> {
 			SleepUtil.sleep(isShuttingDown() ? 0 : deallocatedAnObject ? 50 : 10);
 		}
 
-		private void deallocate(@NotNull final PoolableObject<T> invalidatedObject) {
+		private void deallocate(final PoolableObject<T> invalidatedObject) {
 			allocator.deallocate(invalidatedObject.getAllocatedObject());
 			invalidatedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.DEALLOCATED);
 			invalidatedObject.dereferenceObject();

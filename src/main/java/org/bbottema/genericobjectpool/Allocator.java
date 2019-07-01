@@ -19,21 +19,21 @@ public abstract class Allocator<T> {
 	/**
 	 * Uninitialize an instance which has been released back to the pool, until it is claimed again.
 	 */
-	public void deallocateForReuse(@NotNull T object) {
+	public void deallocateForReuse(T object) {
 		// overridable hook
 	}
 	
 	/**
 	 * Reinitialize an object so it is ready to be claimed.
 	 */
-	public void allocateForReuse(@NotNull T object) {
+	public void allocateForReuse(T object) {
 		// overridable hook
 	}
 	
 	/**
 	 * Clean up an object no longer needed by the pool.
 	 */
-	public void deallocate(@NotNull T object) {
+	public void deallocate(T object) {
 		// overridable hook
 	}
 }

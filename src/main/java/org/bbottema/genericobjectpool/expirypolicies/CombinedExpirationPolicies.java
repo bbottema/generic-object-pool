@@ -3,9 +3,9 @@ package org.bbottema.genericobjectpool.expirypolicies;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import lombok.Value;
 import lombok.experimental.NonFinal;
-import org.jetbrains.annotations.NotNull;
 import org.bbottema.genericobjectpool.ExpirationPolicy;
 import org.bbottema.genericobjectpool.PoolableObject;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Set;
 
@@ -17,7 +17,7 @@ public class CombinedExpirationPolicies<T> implements ExpirationPolicy<T> {
 	private final Set<ExpirationPolicy<T>> expirationPolicies;
 	
 	@Override
-	public boolean hasExpired(@NotNull PoolableObject<T> poolableObject) {
+	public boolean hasExpired(PoolableObject<T> poolableObject) {
 		for (ExpirationPolicy<T> expirationPolicy : expirationPolicies) {
 			if (expirationPolicy.hasExpired(poolableObject)) {
 				return true;

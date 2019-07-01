@@ -2,9 +2,9 @@ package org.bbottema.genericobjectpool.expirypolicies;
 
 import lombok.Value;
 import lombok.experimental.NonFinal;
-import org.jetbrains.annotations.NotNull;
 import org.bbottema.genericobjectpool.ExpirationPolicy;
 import org.bbottema.genericobjectpool.PoolableObject;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.concurrent.TimeUnit;
 
@@ -13,7 +13,7 @@ abstract class TimeoutExpirationPolicy<T> implements ExpirationPolicy<T> {
 	
 	private final long expiryAgeMs;
 	
-	TimeoutExpirationPolicy(long expiryAge, @NotNull TimeUnit unit) {
+	TimeoutExpirationPolicy(long expiryAge, TimeUnit unit) {
 		if (expiryAge < 1) {
 			throw new IllegalArgumentException("Max permitted age cannot be less than 1");
 		}
@@ -21,7 +21,7 @@ abstract class TimeoutExpirationPolicy<T> implements ExpirationPolicy<T> {
 	}
 	
 	@Override
-	public final boolean hasExpired(@NotNull PoolableObject<T> poolableObject) {
+	public final boolean hasExpired(PoolableObject<T> poolableObject) {
 		// not strictly nescesary, but might be useful to the end-user
 		if (poolableObject.getExpiryTimestamp() == null) {
 			poolableObject.setExpiryTimestamp(expiryAgeMs);

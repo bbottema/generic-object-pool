@@ -156,15 +156,15 @@ public class SimpleSingleObjectPoolTest {
 			return true;
 		}
 		
-		public void allocateForReuse(@NotNull Boolean object) {
+		public void allocateForReuse(Boolean object) {
 			lifecycleCount++;
 		}
 		
-		public void deallocateForReuse(@NotNull Boolean object) {
+		public void deallocateForReuse(Boolean object) {
 			lifecycleCount++;
 		}
 		
-		public void deallocate(@NotNull Boolean object) {
+		public void deallocate(Boolean object) {
 			lifecycleCount++;
 		}
 	}

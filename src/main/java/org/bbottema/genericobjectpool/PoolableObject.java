@@ -49,7 +49,7 @@ public class PoolableObject<T> {
 	 */
 	@NotNull @Getter(PACKAGE) @Setter(PACKAGE) private PoolStatus currentPoolStatus;
 	
-	PoolableObject(@NotNull GenericObjectPool<T> pool, @NotNull T allocatedObject) {
+	PoolableObject(GenericObjectPool<T> pool, T allocatedObject) {
 		this.pool = pool;
 		this.allocatedObject = allocatedObject;
 		this.creationStampMs = System.currentTimeMillis();
