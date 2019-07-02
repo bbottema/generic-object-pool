@@ -296,13 +296,6 @@
 				</configuration>
 				<executions>
 					<execution>
-						<id>clean-remove</id>
-						<phase>clean</phase>
-						<goals>
-							<goal>remove</goal>
-						</goals>
-					</execution>
-					<execution>
 						<id>compile-format</id>
 						<phase>compile</phase>
 						<goals>
