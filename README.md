@@ -154,4 +154,23 @@ PoolConfig<Foo> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
 
 #### Other Expiry strategies
 
-...
+You can expire objects based on age since creation or age since last allocation. For these use:
+* `TimeoutSinceCreationExpirationPolicy`
+* `TimeoutSinceLastAllocationExpirationPolicy`
+
+You can also spread the expiry around in a bandwidth to avoid having everything expire at the same time, hogging system resources. for these use:
+* `SpreadedTimeoutSinceCreationExpirationPolicy`
+* `SpreadedTimeoutSinceLastAllocationExpirationPolicy`
+
+You can also combine multiple expirations, by passing instances of them as a set to:
+* `CombinedExpirationPolicies`
+
+Finally, you can extend any of these or create your own from scratch by implementing:
+* `ExpirationPolicy`
+
+To aid you in creating your own expiry policy, you can calculate and store an expiry age on the poolable object:
+```java
+poolableObject.getExpiries().put(this, calculatedAge);
+Long previouslyCalculateAge = poolableObject.getExpiries().get(this);
+```
+You can always extend one the abstract classes `SpreadedTimeoutExpirationPolicy` and `TimeoutExpirationPolicy`, which do this for you.
