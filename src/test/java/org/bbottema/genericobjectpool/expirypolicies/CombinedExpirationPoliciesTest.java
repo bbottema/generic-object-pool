@@ -21,7 +21,7 @@ public class CombinedExpirationPoliciesTest {
 	
 	private CombinedExpirationPolicies<Integer> policy;
 	private PoolableObject<Integer> mockPO;
-	private Map<Object, Long> mockExpiries;
+	private Map<ExpirationPolicy, Long> mockExpiries;
 	private HashSet<ExpirationPolicy<Integer>> policies;
 	
 	@Before
@@ -93,11 +93,12 @@ public class CombinedExpirationPoliciesTest {
 		verify(mockExpiries).put(policy2, SECONDS.toMillis(500));
 	}
 	
+	@SuppressWarnings("SameParameterValue")
 	private void configurePoolableObjectBehavior(TimeoutSinceCreationExpirationPolicy<Integer> policy1, int expiryPolicy1, TimeoutSinceLastAllocationExpirationPolicy<Integer> policy2, int expiryPolicy2) {
 		policies.add(policy1);
 		policies.add(policy2);
 		
-		Map<Object, Long> expiries = new HashMap<>();
+		Map<ExpirationPolicy, Long> expiries = new HashMap<>();
 		expiries.put(policy1, expiryPolicy1 * MS_IN_SECOND);
 		expiries.put(policy2, expiryPolicy2 * MS_IN_SECOND);
 		

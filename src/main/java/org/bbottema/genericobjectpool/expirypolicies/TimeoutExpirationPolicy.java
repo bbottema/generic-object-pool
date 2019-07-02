@@ -39,7 +39,7 @@ public abstract class TimeoutExpirationPolicy<T> implements ExpirationPolicy<T> 
 	@Override
 	public final boolean hasExpired(@NotNull PoolableObject<T> poolableObject) {
 		// not strictly necessary, but might be useful to the end-user
-		final Map<Object, Long> expiriesMs = poolableObject.getExpiriesMs();
+		final Map<ExpirationPolicy, Long> expiriesMs = poolableObject.getExpiriesMs();
 		if (!expiriesMs.containsKey(this)) {
 			expiriesMs.put(this, expiryAgeMs);
 		}

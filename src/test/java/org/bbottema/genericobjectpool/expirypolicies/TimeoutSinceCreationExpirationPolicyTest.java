@@ -1,6 +1,7 @@
 package org.bbottema.genericobjectpool.expirypolicies;
 
 import org.assertj.core.util.Maps;
+import org.bbottema.genericobjectpool.ExpirationPolicy;
 import org.bbottema.genericobjectpool.PoolableObject;
 import org.junit.Before;
 import org.junit.Test;
@@ -19,7 +20,7 @@ public class TimeoutSinceCreationExpirationPolicyTest {
 	
 	private TimeoutSinceCreationExpirationPolicy<Integer> policy;
 	private PoolableObject<Integer> mockPO;
-	private Map<Object, Long> mockExpiries;
+	private Map<ExpirationPolicy, Long> mockExpiries;
 	
 	@Before
 	@SuppressWarnings("unchecked")
@@ -31,7 +32,7 @@ public class TimeoutSinceCreationExpirationPolicyTest {
 		when(mockExpiries.containsKey(policy)).thenReturn(false);
 		when(mockPO.getExpiriesMs())
 				.thenReturn(mockExpiries)
-				.thenReturn(Maps.newHashMap((Object) policy, 500 * MS_IN_SECOND));
+				.thenReturn(Maps.<ExpirationPolicy, Long>newHashMap(policy, 500 * MS_IN_SECOND));
 	}
 	
 	@Test

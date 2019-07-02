@@ -43,7 +43,7 @@ public abstract class SpreadedTimeoutExpirationPolicy<T> implements ExpirationPo
 	
 	@Override
 	public boolean hasExpired(@NotNull PoolableObject<T> poolableObject) {
-		final Map<Object, Long> expiriesMs = poolableObject.getExpiriesMs();
+		final Map<ExpirationPolicy, Long> expiriesMs = poolableObject.getExpiriesMs();
 		if (!expiriesMs.containsKey(this)) {
 			expiriesMs.put(this, lowerBoundMs + (long) (Math.random() * (upperBoundMs - lowerBoundMs)));
 		}

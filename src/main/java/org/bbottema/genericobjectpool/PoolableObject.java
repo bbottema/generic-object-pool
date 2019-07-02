@@ -58,7 +58,7 @@ public class PoolableObject<T> {
 	 */
 	private final long creationStampMs;
 	private long allocationStampMs;
-	@NotNull @Getter private Map<Object, Long> expiriesMs = new HashMap<>();
+	@NotNull @Getter private Map<ExpirationPolicy, Long> expiriesMs = new HashMap<>();
 	/**
 	 * Performance optimisation: this field keeps track of the list this poolable object is in, so we don't have to do {@code .contains(object)}
 	 * all the time.
