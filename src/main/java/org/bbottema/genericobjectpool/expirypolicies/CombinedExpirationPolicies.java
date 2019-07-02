@@ -33,11 +33,12 @@ public class CombinedExpirationPolicies<T> implements ExpirationPolicy<T> {
 	
 	@Override
 	public boolean hasExpired(@NotNull PoolableObject<T> poolableObject) {
+		boolean expired = false;
 		for (ExpirationPolicy<T> expirationPolicy : expirationPolicies) {
 			if (expirationPolicy.hasExpired(poolableObject)) {
-				return true;
+				expired = true; // don't return, expiry policies mutate poolable objects, which might be useful for inspection
 			}
 		}
-		return false;
+		return expired;
 	}
 }

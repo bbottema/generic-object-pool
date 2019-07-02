@@ -19,9 +19,10 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
 import static lombok.AccessLevel.PACKAGE;
 import static org.bbottema.genericobjectpool.PoolableObject.PoolStatus.AVAILABLE;
@@ -57,7 +58,7 @@ public class PoolableObject<T> {
 	 */
 	private final long creationStampMs;
 	private long allocationStampMs;
-	@Nullable @Getter @Setter private Long expiryTimestamp;
+	@NotNull @Getter private Map<Object, Long> expiriesMs = new HashMap<>();
 	/**
 	 * Performance optimisation: this field keeps track of the list this poolable object is in, so we don't have to do {@code .contains(object)}
 	 * all the time.

@@ -32,6 +32,6 @@ public class TimeoutSinceLastAllocationExpirationPolicy<T> extends TimeoutExpira
 	@Override
 	@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "False positive")
 	boolean _hasExpired(@NotNull PoolableObject<T> poolableObject) {
-		return poolableObject.allocationAgeMs() >= requireNonNull(poolableObject.getExpiryTimestamp());
+		return poolableObject.allocationAgeMs() >= requireNonNull(poolableObject.getExpiriesMs().get(this));
 	}
 }

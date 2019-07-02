@@ -32,6 +32,6 @@ public class TimeoutSinceCreationExpirationPolicy<T> extends TimeoutExpirationPo
 	@Override
 	@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "False positive")
 	boolean _hasExpired(@NotNull PoolableObject<T> poolableObject) {
-		return poolableObject.ageMs() >= requireNonNull(poolableObject.getExpiryTimestamp());
+		return poolableObject.ageMs() >= requireNonNull(poolableObject.getExpiriesMs().get(this));
 	}
 }

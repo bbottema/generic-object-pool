@@ -21,6 +21,7 @@ import org.bbottema.genericobjectpool.ExpirationPolicy;
 import org.bbottema.genericobjectpool.PoolableObject;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 @NonFinal@Value
@@ -42,8 +43,9 @@ abstract class SpreadedTimeoutExpirationPolicy<T> implements ExpirationPolicy<T>
 	
 	@Override
 	public boolean hasExpired(@NotNull PoolableObject<T> poolableObject) {
-		if (poolableObject.getExpiryTimestamp() == null) {
-			poolableObject.setExpiryTimestamp(lowerBoundMs + (long) (Math.random() * (upperBoundMs - lowerBoundMs)));
+		final Map<Object, Long> expiriesMs = poolableObject.getExpiriesMs();
+		if (!expiriesMs.containsKey(this)) {
+			expiriesMs.put(this, lowerBoundMs + (long) (Math.random() * (upperBoundMs - lowerBoundMs)));
 		}
 		return _hasExpired(poolableObject);
 	}
