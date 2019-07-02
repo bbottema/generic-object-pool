@@ -25,7 +25,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 @NonFinal@Value
-abstract class SpreadedTimeoutExpirationPolicy<T> implements ExpirationPolicy<T> {
+public abstract class SpreadedTimeoutExpirationPolicy<T> implements ExpirationPolicy<T> {
 	
 	private final long lowerBoundMs;
 	private final long upperBoundMs;
