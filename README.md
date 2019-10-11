@@ -1,4 +1,4 @@
-[![APACHE v2 License](https://img.shields.io/badge/license-apachev2-blue.svg?style=flat)](LICENSE-2.0.txt) [![Latest Release](https://img.shields.io/maven-central/v/com.github.bbottema/generic-object-pool.svg?style=flat)](http://search.maven.org/#search%7Cgav%7C1%7Cg%3A%22com.github.bbottema%22%20AND%20a%3A%22generic-object-pool%22) [![Build Status](https://img.shields.io/badge/CircleCI-build-brightgreen.svg?style=flat)](https://circleci.com/gh/bbottema/generic-object-pool) [![Codacy](https://img.shields.io/codacy/grade/b1183f7def224cd7b505b42a9a1e2b65.svg?style=flat)](https://www.codacy.com/app/b-bottema/generic-object-pool)
+[![APACHE v2 License](https://img.shields.io/badge/license-apachev2-blue.svg?style=flat)](LICENSE-2.0.txt) [![Latest Release](https://img.shields.io/maven-central/v/com.github.bbottema/generic-object-pool.svg?style=flat)](http://search.maven.org/#search%7Cgav%7C1%7Cg%3A%22com.github.bbottema%22%20AND%20a%3A%22generic-object-pool%22) [![Codacy](https://img.shields.io/codacy/grade/b1183f7def224cd7b505b42a9a1e2b65.svg?style=flat)](https://www.codacy.com/app/b-bottema/generic-object-pool)
 
 # generic-object-pool
 
