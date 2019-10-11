@@ -193,7 +193,8 @@ public class GenericObjectPool<T> {
 	}
 
 	/**
-	 * Shuts down the current Pool stopping Allocations
+	 * Shuts down the current Pool stopping new allocations and triggering deallocations on all other available objects. Waits for
+	 * claimed objects to become available.
 	 */
 	public synchronized Future<?> shutdown() {
 		return isShuttingDown()

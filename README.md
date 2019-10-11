@@ -2,11 +2,11 @@
 
 # generic-object-pool
 
-generic-object-pool is a lightweight generic object pool, providing object lifecycle management, metrics, claim / release mechanism and object invalidation, as well as auto initialize a core pool and 
-auto expiry 
-policies.
+generic-object-pool is a lightweight generic object pool, providing object lifecycle management, 
+metrics, claim / release mechanism and object invalidation, as well as auto initialize a core pool and 
+auto expiry policies.
 
-[API Documentation](https://www.javadoc.io/doc/com.github.bbottema/generic-object-pool/1.0.0)
+[API Documentation](https://www.javadoc.io/page/com.github.bbottema/generic-object-pool/latest/index.html)
 
 ## Setup
 
@@ -16,7 +16,7 @@ Maven Dependency Setup
 <dependency>
 	<groupId>com.github.bbottema</groupId>
 	<artifactId>generic-object-pool</artifactId>
-	<version>x.y.z</version>
+	<version>1.0.3</version>
 </dependency>
 ```
 
