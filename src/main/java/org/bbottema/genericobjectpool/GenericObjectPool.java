@@ -11,6 +11,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -182,9 +183,12 @@ public class GenericObjectPool<T> {
 	 * claimed objects to become available.
 	 */
 	public synchronized Future<Void> shutdown() {
-		return isShuttingDown()
-				? shutdownSequence
-				: (shutdownSequence = newSingleThreadExecutor(poolConfig.getThreadFactory()).submit(new ShutdownSequence(), null));
+		if (!isShuttingDown()) {
+			ExecutorService executorService = newSingleThreadExecutor(poolConfig.getThreadFactory());
+			shutdownSequence = executorService.submit(new ShutdownSequence(), null);
+			executorService.shutdown();
+		}
+		return shutdownSequence;
 	}
 	
 	private boolean isShuttingDown() {
