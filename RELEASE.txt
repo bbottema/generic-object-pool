@@ -4,7 +4,7 @@ https://github.com/bbottema/generic-object-pool
 RELEASE NOTES generic-object-pool
 
 
-v1.0.4 (30 Januari 2020)
+v1.0.4 - 1.0.5 (30 Januari 2020)
 
 - Specify Future generic type as Void
 
