@@ -12,7 +12,7 @@
 	<artifactId>generic-object-pool</artifactId>
 	<packaging>jar</packaging>
 	<name>generic-object-pool</name>
-	<version>1.0.4</version>
+	<version>1.0.5</version>
 	<description>Flexible thread-safe generic object pool</description>
 	<url>http:///github.com/bbottema/generic-object-pool</url>
 	<inceptionYear>2019</inceptionYear>
