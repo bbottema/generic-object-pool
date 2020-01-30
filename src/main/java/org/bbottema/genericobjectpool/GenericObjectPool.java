@@ -34,7 +34,7 @@ public class GenericObjectPool<T> {
 	@NotNull @Getter private final PoolConfig<T> poolConfig;
 	@NotNull @Getter private final Allocator<T> allocator;
 	
-	@Nullable private volatile Future<?> shutdownSequence;
+	@Nullable private volatile Future<Void> shutdownSequence;
 	
 	@NotNull private final AtomicInteger currentlyClaimed = new AtomicInteger();
 	@NotNull private final AtomicLong totalAllocated = new AtomicLong();
@@ -181,10 +181,10 @@ public class GenericObjectPool<T> {
 	 * Shuts down the current Pool stopping new allocations and triggering deallocations on all other available objects. Waits for
 	 * claimed objects to become available.
 	 */
-	public synchronized Future<?> shutdown() {
+	public synchronized Future<Void> shutdown() {
 		return isShuttingDown()
 				? shutdownSequence
-				: (shutdownSequence = newSingleThreadExecutor(poolConfig.getThreadFactory()).submit(new ShutdownSequence()));
+				: (shutdownSequence = newSingleThreadExecutor(poolConfig.getThreadFactory()).submit(new ShutdownSequence(), null));
 	}
 	
 	private boolean isShuttingDown() {
