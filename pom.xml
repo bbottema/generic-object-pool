@@ -6,7 +6,7 @@
 	<parent>
 		<groupId>com.github.bbottema</groupId>
 		<artifactId>standard-project-parent</artifactId>
-		<version>1.0.3</version>
+		<version>1.0.24</version>
 	</parent>
 
 	<artifactId>generic-object-pool</artifactId>
@@ -16,6 +16,11 @@
 	<description>Flexible thread-safe generic object pool</description>
 	<url>http:///github.com/bbottema/generic-object-pool</url>
 	<inceptionYear>2019</inceptionYear>
+
+	<properties>
+		<license.owner.name>Benny Bottema</license.owner.name>
+		<license.owner.email>benny@bennybottema.com</license.owner.email>
+	</properties>
 
 	<scm>
 		<connection>scm:git:git://github.com/bbottema/generic-object-pool.git</connection>
