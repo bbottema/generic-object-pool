@@ -263,9 +263,13 @@ public class GenericObjectPool<T> {
 			}
 			SleepUtil.sleep(isShuttingDown() ? 0 : deallocatedAnObject ? 50 : 10);
 		}
-
+		
 		private void deallocate(final PoolableObject<T> invalidatedObject) {
-			allocator.deallocate(invalidatedObject.getAllocatedObject());
+			try {
+				allocator.deallocate(invalidatedObject.getAllocatedObject());
+			} catch (Exception e) {
+				log.error("error deallocating object already removed from the pool, ignoring it from now one...", e);
+			}
 			invalidatedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.DEALLOCATED);
 			invalidatedObject.dereferenceObject();
 		}

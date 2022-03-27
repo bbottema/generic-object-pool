@@ -136,7 +136,28 @@ public class SimpleSingleObjectPoolTest {
 	public void testObjectLifecycle() throws Exception {
 		TestLifecycleAllocator allocator = new TestLifecycleAllocator();
 		GenericObjectPool<Boolean> pool = new GenericObjectPool<>(PoolConfig.<Boolean>builder().maxPoolsize(1).build(), allocator);
-
+		
+		assertStatistics(pool, allocator);
+	}
+	
+	/**
+	 * Deallocation throws an error, but that should not prevent the deallocation cycle from breaking, causing a memory leak to boot.
+	 */
+	@Test
+	public void testThreadLeakFixGitHub() throws Exception {
+		TestLifecycleAllocator allocator = new TestLifecycleAllocator() {
+			@Override
+			public void deallocate(Boolean object) {
+				super.deallocate(object);
+				throw new RuntimeException("deallocation fail");
+			}
+		};
+		GenericObjectPool<Boolean> pool = new GenericObjectPool<>(PoolConfig.<Boolean>builder().maxPoolsize(1).build(), allocator);
+		
+		assertStatistics(pool, allocator);
+	}
+	
+	private void assertStatistics(GenericObjectPool<Boolean> pool, TestLifecycleAllocator allocator) throws InterruptedException {
 		PoolableObject<Boolean> obj = pool.claim();
 		obj.release();
 		obj = pool.claim();
@@ -145,6 +166,19 @@ public class SimpleSingleObjectPoolTest {
 		assertThat(allocator.lifecycleCount).isEqualTo(3);
 		TimeUnit.MILLISECONDS.sleep(100);
 		assertThat(allocator.lifecycleCount).isEqualTo(4);
+		
+		assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(0);
+		
+		obj = pool.claim();
+		obj.release();
+		obj = pool.claim();
+		obj.invalidate();
+		
+		assertThat(allocator.lifecycleCount).isEqualTo(7);
+		TimeUnit.MILLISECONDS.sleep(100);
+		assertThat(allocator.lifecycleCount).isEqualTo(8);
+		
+		assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(0);
 	}
 	
 	static class TestLifecycleAllocator extends Allocator<Boolean> {
