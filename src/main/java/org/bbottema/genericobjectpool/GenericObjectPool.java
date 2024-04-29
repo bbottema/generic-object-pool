@@ -242,14 +242,18 @@ public class GenericObjectPool<T> {
 			}
 			log.debug("AutoAllocatorDeallocator finished");
 		}
-		
+
 		private void allocatedCorePoolAndDeallocateOneOrPlanDeallocations() {
 			boolean deallocatedAnObject = false;
 			lock.lock();
 			try {
-				while (getCurrentlyAllocated() < poolConfig.getCorePoolsize() && !isShuttingDown()) {
-					available.addLast(new PoolableObject<>(GenericObjectPool.this, allocator.allocate()));
-					totalAllocated.incrementAndGet();
+				try {
+					while (getCurrentlyAllocated() < poolConfig.getCorePoolsize() && !isShuttingDown()) {
+						available.addLast(new PoolableObject<>(GenericObjectPool.this, allocator.allocate()));
+						totalAllocated.incrementAndGet();
+					}
+				} catch (Exception exception) {
+					log.error("Not able to allocate!", exception);
 				}
 				if (!waitingForDeallocation.isEmpty()) {
 					deallocate(waitingForDeallocation.remove());
