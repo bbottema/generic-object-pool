@@ -252,8 +252,8 @@ public class GenericObjectPool<T> {
 						available.addLast(new PoolableObject<>(GenericObjectPool.this, allocator.allocate()));
 						totalAllocated.incrementAndGet();
 					}
-				} catch (Exception exception) {
-					log.error("Not able to allocate!", exception);
+				} catch (Exception e) {
+					log.error("Not able to allocate new object! This might be a temporary issue due to external reasons (a server rejecting a connection for example).", e);
 				}
 				if (!waitingForDeallocation.isEmpty()) {
 					deallocate(waitingForDeallocation.remove());
