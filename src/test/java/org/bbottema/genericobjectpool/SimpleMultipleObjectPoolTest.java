@@ -1,7 +1,7 @@
 package org.bbottema.genericobjectpool;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -19,7 +19,7 @@ public class SimpleMultipleObjectPoolTest {
 	
 	private GenericObjectPool<String> pool1, pool2, pool3;
 
-	@Before
+	@BeforeEach
 	public void setup() {
 		pool1 = new GenericObjectPool<>(PoolConfig.<String>builder().maxPoolsize(MAX_ITEMS_PER_KEY).build(), ObjectPoolTestHelper.createAllocator("a"));
 		pool2 = new GenericObjectPool<>(PoolConfig.<String>builder().maxPoolsize(MAX_ITEMS_PER_KEY).build(), ObjectPoolTestHelper.createAllocator("b"));

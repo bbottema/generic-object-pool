@@ -7,7 +7,7 @@ import org.bbottema.genericobjectpool.PoolMetrics;
 import org.bbottema.genericobjectpool.PoolableObject;
 import org.bbottema.genericobjectpool.expirypolicies.TimeoutSinceCreationExpirationPolicy;
 import org.jetbrains.annotations.NotNull;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;

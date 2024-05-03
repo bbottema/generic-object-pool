@@ -2,8 +2,8 @@ package org.bbottema.genericobjectpool.expirypolicies;
 
 import org.bbottema.genericobjectpool.ExpirationPolicy;
 import org.bbottema.genericobjectpool.PoolableObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,7 +24,7 @@ public class CombinedExpirationPoliciesTest {
 	private Map<ExpirationPolicy, Long> mockExpiries;
 	private HashSet<ExpirationPolicy<Integer>> policies;
 	
-	@Before
+	@BeforeEach
 	@SuppressWarnings("unchecked")
 	public void setup() {
 		policies = new HashSet<>();

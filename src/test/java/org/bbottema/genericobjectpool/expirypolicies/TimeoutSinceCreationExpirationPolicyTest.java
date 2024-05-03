@@ -3,8 +3,8 @@ package org.bbottema.genericobjectpool.expirypolicies;
 import org.assertj.core.util.Maps;
 import org.bbottema.genericobjectpool.ExpirationPolicy;
 import org.bbottema.genericobjectpool.PoolableObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
@@ -22,7 +22,7 @@ public class TimeoutSinceCreationExpirationPolicyTest {
 	private PoolableObject<Integer> mockPO;
 	private Map<ExpirationPolicy, Long> mockExpiries;
 	
-	@Before
+	@BeforeEach
 	@SuppressWarnings("unchecked")
 	public void setup() {
 		policy = new TimeoutSinceCreationExpirationPolicy<>(500, SECONDS);

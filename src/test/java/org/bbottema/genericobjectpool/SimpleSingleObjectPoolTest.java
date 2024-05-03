@@ -1,8 +1,9 @@
 package org.bbottema.genericobjectpool;
 
+import org.assertj.core.api.Assertions;
 import org.jetbrains.annotations.NotNull;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -10,15 +11,14 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.fail;
+import static org.assertj.core.api.Assertions.*;
 import static org.bbottema.genericobjectpool.ObjectPoolTestHelper.createAllocator;
 
 public class SimpleSingleObjectPoolTest {
 
 	private GenericObjectPool<String> pool1, pool2;
 	
-	@Before
+	@BeforeEach
 	public void setup() {
 		pool1 = new GenericObjectPool<>(PoolConfig.<String>builder().maxPoolsize(1).build(), createAllocator("a"));
 		pool2 = new GenericObjectPool<>(PoolConfig.<String>builder().maxPoolsize(1).build(), createAllocator("b"));
@@ -113,20 +113,14 @@ public class SimpleSingleObjectPoolTest {
 	/**
 	 * Tests shutting down the pool and not allowing any more allocations
 	 */
-	@Test(expected = IllegalStateException.class)
+	@Test
 	public void testShutdown() throws Exception {
 		verifyPool1RemainsUnaffectedAfterClaimingPool2();
 		
 		pool1.shutdown();
 		pool2.shutdown();
 
-		try {
-			pool2.claim();
-		} catch (IllegalStateException e) {
-			throw e;
-		} catch (Exception e) {
-			fail(e.getMessage(), e);
-		}
+		assertThatThrownBy(pool2::claim).isInstanceOf(IllegalStateException.class);
 	}
 	
 	/**
