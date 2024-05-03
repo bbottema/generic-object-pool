@@ -268,7 +268,7 @@ public class GenericObjectPool<T> {
 			try {
 				allocator.deallocate(invalidatedObject.getAllocatedObject());
 			} catch (Exception e) {
-				log.error("error deallocating object already removed from the pool, ignoring it from now one...", e);
+				log.error("error deallocating object already removed from the pool, ignoring it from now on...", e);
 			}
 			invalidatedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.DEALLOCATED);
 			invalidatedObject.dereferenceObject();
