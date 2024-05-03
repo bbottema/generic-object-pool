@@ -37,7 +37,7 @@ public class PoolableObject<T> {
 	 * </ul>
 	 */
 	@NotNull private T allocatedObject;
-	@Getter private final Date createdOn = new Date();
+	private final Date createdOn = new Date();
 	/**
 	 * Millisecond stamp from {@link System#currentTimeMillis()}, similar to {@link #getCreatedOn()}.
 	 */
@@ -107,5 +107,9 @@ public class PoolableObject<T> {
 			throw new IllegalStateException("This object has already been deallocated, you can't use it anymore!");
 		}
 		return allocatedObject;
+	}
+
+	public Date getCreatedOn() {
+		return new Date(createdOn.getTime()); // Return a defensive copy
 	}
 }
