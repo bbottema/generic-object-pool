@@ -27,7 +27,8 @@ import static org.bbottema.genericobjectpool.util.ForeverTimeout.WAIT_FOREVER;
 @Slf4j
 public class GenericObjectPool<T> {
 	
-	@NotNull private final Lock lock = new ReentrantLock();
+	@NotNull private final Lock claimLock = new ReentrantLock();
+	@NotNull private final Lock deallocateLock = new ReentrantLock();
 	@NotNull private final LinkedList<PoolableObject<T>> available = new LinkedList<>();
 	@NotNull private final LinkedList<PoolableObject<T>> waitingForDeallocation = new LinkedList<>();
 	@NotNull private final LinkedList<Condition> objectAvailableConditions = new LinkedList<>();
@@ -44,7 +45,8 @@ public class GenericObjectPool<T> {
 	public GenericObjectPool(final PoolConfig<T> poolConfig, @NotNull final Allocator<T> allocator) {
 		this.poolConfig = poolConfig;
 		this.allocator = allocator;
-		poolConfig.getThreadFactory().newThread(new AutoAllocatorDeallocator()).start();
+		poolConfig.getThreadFactory().newThread(new AutoAllocator()).start();
+		poolConfig.getThreadFactory().newThread(new AutoDeallocator()).start();
 	}
 	
 	/**
@@ -73,16 +75,16 @@ public class GenericObjectPool<T> {
 	@SuppressWarnings("WeakerAccess")
 	@Nullable
 	public PoolableObject<T> claim(final Timeout timeout) throws InterruptedException, IllegalStateException {
-		lock.lock();
+		claimLock.lock();
 		try {
 			return claimOrCreateOrWaitUntilAvailable(timeout);
 		} finally {
-			lock.unlock();
+			claimLock.unlock();
 		}
 	}
 
 	void releasePoolableObject(final PoolableObject<T> claimedObject) {
-		lock.lock();
+		claimLock.lock();
 		try {
 			if (isShuttingDown()) {
 				invalidatePoolableObject(claimedObject);
@@ -98,25 +100,48 @@ public class GenericObjectPool<T> {
 				}
 			}
 		} finally {
-			lock.unlock();
+			claimLock.unlock();
 		}
 	}
 
 	void invalidatePoolableObject(final PoolableObject<T> claimedObject) {
-		lock.lock();
+		claimLock.lock();
 		try {
 			if (claimedObject.getCurrentPoolStatus() == PoolableObject.PoolStatus.CLAIMED) {
 				currentlyClaimed.decrementAndGet();
 			} else if (claimedObject.getCurrentPoolStatus() == PoolableObject.PoolStatus.AVAILABLE) {
 				available.remove(claimedObject);
 			}
-			if (claimedObject.getCurrentPoolStatus().ordinal() < PoolableObject.PoolStatus.WAITING_FOR_DEALLOCATION.ordinal()) {
-				waitingForDeallocation.add(claimedObject);
-				claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.WAITING_FOR_DEALLOCATION);
+		} finally {
+			claimLock.unlock();
+		}
+
+		if (claimedObject.getCurrentPoolStatus().ordinal() < PoolableObject.PoolStatus.WAITING_FOR_DEALLOCATION.ordinal()) {
+			addObjectForDeallocation(claimedObject);
+		}
+	}
+
+	private void addObjectForDeallocation(final PoolableObject<T> claimedObject) {
+		deallocateLock.lock();
+		try {
+			waitingForDeallocation.add(claimedObject);
+			claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.WAITING_FOR_DEALLOCATION);
+		} finally {
+			deallocateLock.unlock();
+		}
+	}
+
+	private PoolableObject<T> getObjectForDeallocation() {
+		PoolableObject<T> poolableObject = null;
+		deallocateLock.lock();
+		try {
+			if (!waitingForDeallocation.isEmpty()) {
+				poolableObject = waitingForDeallocation.remove();
 			}
 		} finally {
-			lock.unlock();
+			deallocateLock.unlock();
 		}
+		return poolableObject;
 	}
 	
 	@Nullable
@@ -165,7 +190,7 @@ public class GenericObjectPool<T> {
 	 * @throws InterruptedException the interrupted exception
 	 */
 	private boolean waitForAvailableObjectOrTimeout(final Timeout timeout) throws InterruptedException {
-		final Condition objectAvailability = lock.newCondition();
+		final Condition objectAvailability = claimLock.newCondition();
 		try {
 			objectAvailableConditions.add(objectAvailability);
 			final boolean await = objectAvailability.await(timeout.getDuration(), timeout.getTimeUnit());
@@ -210,7 +235,7 @@ public class GenericObjectPool<T> {
 	 */
 	@NotNull
 	public PoolMetrics getPoolMetrics() {
-		lock.lock();
+		claimLock.lock();
 		try {
 			return new PoolMetrics(
 					currentlyClaimed.get(),
@@ -221,93 +246,118 @@ public class GenericObjectPool<T> {
 					totalAllocated.get(),
 					totalClaimed.get());
 		} finally {
-			lock.unlock();
+			claimLock.unlock();
 		}
 	}
-	
+
+	private void deallocate(final PoolableObject<T> invalidatedObject) {
+		try {
+			allocator.deallocate(invalidatedObject.getAllocatedObject());
+		} catch (Exception e) {
+			log.error("error deallocating object already removed from the pool, ignoring it from now on...", e);
+		}
+		invalidatedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.DEALLOCATED);
+		invalidatedObject.dereferenceObject();
+	}
+
+	private void invalidateExpiredObject(ExpirationPolicy<T> expirationPolicy, PoolableObject<T> expiredObject) {
+		claimLock.lock();
+		try {
+			if (expirationPolicy.hasExpired(expiredObject)) {
+				expiredObject.invalidate();
+			}
+		} finally {
+			claimLock.unlock();
+		}
+	}
+
+	private void scheduleDeallocations() {
+		final ExpirationPolicy<T> expirationPolicy = poolConfig.getExpirationPolicy();
+		if (expirationPolicy == ExpirationPolicy.NeverExpirePolicy.getInstance()) {
+			log.info("ExpirationPolicy set to NeverExpire, Skipping invalidation of expired objects!");
+			return;
+		}
+		for (PoolableObject<T> expiredObject : gatherExpiredObjects(expirationPolicy)) {
+			invalidateExpiredObject(expirationPolicy, expiredObject);
+		}
+	}
+
+	private List<PoolableObject<T>> gatherExpiredObjects(ExpirationPolicy<T> expirationPolicy) {
+		final List<PoolableObject<T>> expiredObjects = new ArrayList<>();
+		claimLock.lock();
+		try {
+			for (final PoolableObject<T> poolableObject : available) {
+				if (expirationPolicy.hasExpired(poolableObject)) {
+					expiredObjects.add(poolableObject);
+				}
+			}
+		} finally {
+			claimLock.unlock();
+		}
+		return expiredObjects;
+	}
+
 	/**
 	 * <ol>
-	 *     <li>Automatically allocates objects until core pool size is met. Initially fills up the pool and when object are deallocated.</li>
 	 *     <li>Automatically plan deallocation for expired objects</li>
 	 *     <li>Automatically deallocates one object every loop</li>
 	 * </ol>
 	 */
-	private class AutoAllocatorDeallocator implements Runnable {
+	private class AutoDeallocator implements Runnable {
+
 		@Override
 		@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH", justification = "False positive")
 		public void run() {
 			//noinspection ConstantConditions
 			while (shutdownSequence == null || !shutdownSequence.isDone() || !waitingForDeallocation.isEmpty()) {
-				allocatedCorePoolAndDeallocateOneOrPlanDeallocations();
+				deallocateOneOrPlanDeallocations();
 			}
-			log.debug("AutoAllocatorDeallocator finished");
+			log.debug("AutoDeallocator finished");
 		}
 
-		private void allocatedCorePoolAndDeallocateOneOrPlanDeallocations() {
+		private void deallocateOneOrPlanDeallocations() {
 			boolean deallocatedAnObject = false;
-			lock.lock();
-			try {
-				try {
-					while (getCurrentlyAllocated() < poolConfig.getCorePoolsize() && !isShuttingDown()) {
-						available.addLast(new PoolableObject<>(GenericObjectPool.this, allocator.allocate()));
-						totalAllocated.incrementAndGet();
-					}
-				} catch (Exception e) {
-					log.error("Not able to allocate new object! This might be a temporary issue due to external reasons (a server rejecting a connection for example).", e);
-				}
-				if (!waitingForDeallocation.isEmpty()) {
-					deallocate(waitingForDeallocation.remove());
-					deallocatedAnObject = true;
-				}
-			} finally {
-				lock.unlock();
+			PoolableObject<T> poolableObject = getObjectForDeallocation();
+			if (poolableObject != null) {
+				deallocate(poolableObject);
+				deallocatedAnObject = true;
 			}
 			if (!deallocatedAnObject) {
-				scheduleDeallocations(); // execute outside of lock, so very big pools won't hog CPU
+				scheduleDeallocations();
 			}
 			SleepUtil.sleep(isShuttingDown() ? 0 : deallocatedAnObject ? 50 : 10);
 		}
-		
-		private void deallocate(final PoolableObject<T> invalidatedObject) {
+	}
+
+	/**
+	 * <ol>
+	 * <li>Automatically allocates objects until core pool size is met. Initially fills up the pool and when object are
+	 * deallocated.</li>
+	 * </ol>
+	 */
+	private class AutoAllocator implements Runnable {
+
+		@Override
+		@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH", justification = "False positive")
+		public void run() {
+			//noinspection ConstantConditions
+			while (shutdownSequence == null || !shutdownSequence.isDone() || !waitingForDeallocation.isEmpty()) {
+				allocatedCorePool();
+			}
+			log.debug("AutoAllocator finished");
+		}
+
+		private void allocatedCorePool() {
+			claimLock.lock();
 			try {
-				allocator.deallocate(invalidatedObject.getAllocatedObject());
+				while (getCurrentlyAllocated() < poolConfig.getCorePoolsize() && !isShuttingDown()) {
+					available.addLast(new PoolableObject<>(GenericObjectPool.this, allocator.allocate()));
+					totalAllocated.incrementAndGet();
+				}
 			} catch (Exception e) {
-				log.error("error deallocating object already removed from the pool, ignoring it from now on...", e);
-			}
-			invalidatedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.DEALLOCATED);
-			invalidatedObject.dereferenceObject();
-		}
-		
-		private void scheduleDeallocations() {
-			final ExpirationPolicy<T> expirationPolicy = poolConfig.getExpirationPolicy();
-			for (PoolableObject<T> expiredObject : gatherExpiredObjects(expirationPolicy)) {
-				invalidateExpiredObject(expirationPolicy, expiredObject);
-			}
-		}
-		
-		private List<PoolableObject<T>> gatherExpiredObjects(ExpirationPolicy<T> expirationPolicy) {
-			final List<PoolableObject<T>> expiredObjects = new ArrayList<>();
-			lock.lock();
-			try {
-				for (final PoolableObject<T> poolableObject : available) {
-					if (expirationPolicy.hasExpired(poolableObject)) {
-						expiredObjects.add(poolableObject);
-					}
-				}
+				log.error("Not able to allocate new object! This might be a temporary issue due to external reasons (a server rejecting a connection for example).", e);
 			} finally {
-				lock.unlock();
-			}
-			return expiredObjects;
-		}
-		
-		private void invalidateExpiredObject(ExpirationPolicy<T> expirationPolicy, PoolableObject<T> expiredObject) {
-			lock.lock();
-			try {
-				if (expirationPolicy.hasExpired(expiredObject)) {
-					expiredObject.invalidate();
-				}
-			} finally {
-				lock.unlock();
+				claimLock.unlock();
 			}
 		}
 	}
@@ -322,7 +372,7 @@ public class GenericObjectPool<T> {
 		}
 		
 		private void initiateShutdown() {
-			lock.lock();
+			claimLock.lock();
 			try {
 				while (!available.isEmpty()) {
 					available.remove().invalidate();
@@ -331,7 +381,7 @@ public class GenericObjectPool<T> {
 					condition.signal();
 				}
 			} finally {
-				lock.unlock();
+				claimLock.unlock();
 			}
 		}
 		
