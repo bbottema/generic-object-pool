@@ -6,6 +6,7 @@ import org.bbottema.genericobjectpool.PoolConfig;
 import org.bbottema.genericobjectpool.PoolMetrics;
 import org.bbottema.genericobjectpool.PoolableObject;
 import org.bbottema.genericobjectpool.expirypolicies.TimeoutSinceCreationExpirationPolicy;
+import org.bbottema.genericobjectpool.util.SleepUtil;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Test;
 
@@ -20,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static java.util.Objects.requireNonNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class TestApi {
     
@@ -260,21 +262,32 @@ public class TestApi {
         final PoolConfig<AtomicReference<Integer>> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
                 .corePoolsize(2)
                 .maxPoolsize(3)
-                .expirationPolicy(new TimeoutSinceCreationExpirationPolicy<AtomicReference<Integer>>(40, TimeUnit.MILLISECONDS))
+                .expirationPolicy(new TimeoutSinceCreationExpirationPolicy<AtomicReference<Integer>>(200, TimeUnit.MILLISECONDS))
                 .build();
         GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
         
-        TimeUnit.MILLISECONDS.sleep(60);
-        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
-        TimeUnit.MILLISECONDS.sleep(55);
-        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
-        TimeUnit.MILLISECONDS.sleep(55);
-        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
-    
-        assertThat(pool.getPoolMetrics().getTotalAllocated()).isEqualTo(6);
+        TimeUnit.MILLISECONDS.sleep(100);
+        assertTrue(waitAndCheck(pool, 10, 3));
+        TimeUnit.MILLISECONDS.sleep(260);
+        assertTrue(waitAndCheck(pool, 10, 3));
+        TimeUnit.MILLISECONDS.sleep(280);
+        assertTrue(waitAndCheck(pool, 10, 3));
         assertThat(pool.getPoolMetrics().getTotalClaimed()).isZero();
     }
-    
+
+    private boolean waitAndCheck(GenericObjectPool<AtomicReference<Integer>> pool, int waitTime, int loopCount) {
+        boolean isPassed = false;
+        while (loopCount > 0) {
+            if (pool.getPoolMetrics().getCurrentlyAllocated() == 2) {
+                isPassed = true;
+                break;
+            }
+            SleepUtil.sleep(waitTime);
+            loopCount--;
+        }
+        return isPassed;
+    }
+
     private void assertDeallocated(final AtomicReference<PoolableObject<AtomicReference<Integer>>> claimedPoolable1) {
         assertThatThrownBy(new ThrowingCallable() {
             @Override

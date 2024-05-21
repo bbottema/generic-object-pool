@@ -260,41 +260,30 @@ public class GenericObjectPool<T> {
 		invalidatedObject.dereferenceObject();
 	}
 
-	private void invalidateExpiredObject(ExpirationPolicy<T> expirationPolicy, PoolableObject<T> expiredObject) {
-		claimLock.lock();
-		try {
-			if (expirationPolicy.hasExpired(expiredObject)) {
-				expiredObject.invalidate();
-			}
-		} finally {
-			claimLock.unlock();
-		}
-	}
-
 	private void scheduleDeallocations() {
 		final ExpirationPolicy<T> expirationPolicy = poolConfig.getExpirationPolicy();
 		if (expirationPolicy == ExpirationPolicy.NeverExpirePolicy.getInstance()) {
 			log.info("ExpirationPolicy set to NeverExpire, Skipping invalidation of expired objects!");
 			return;
 		}
-		for (PoolableObject<T> expiredObject : gatherExpiredObjects(expirationPolicy)) {
-			invalidateExpiredObject(expirationPolicy, expiredObject);
-		}
+		int objectsInvalidated = invalidateExpiredObjects(expirationPolicy);
+		log.debug("{} objects invalidated as per expiration policy!", objectsInvalidated);
 	}
 
-	private List<PoolableObject<T>> gatherExpiredObjects(ExpirationPolicy<T> expirationPolicy) {
-		final List<PoolableObject<T>> expiredObjects = new ArrayList<>();
+	private int invalidateExpiredObjects(ExpirationPolicy<T> expirationPolicy) {
+		int invalidatedObjects = 0;
 		claimLock.lock();
 		try {
 			for (final PoolableObject<T> poolableObject : available) {
 				if (expirationPolicy.hasExpired(poolableObject)) {
-					expiredObjects.add(poolableObject);
+					poolableObject.invalidate();
+					invalidatedObjects++;
 				}
 			}
 		} finally {
 			claimLock.unlock();
 		}
-		return expiredObjects;
+		return invalidatedObjects;
 	}
 
 	/**
@@ -343,6 +332,7 @@ public class GenericObjectPool<T> {
 			//noinspection ConstantConditions
 			while (shutdownSequence == null || !shutdownSequence.isDone() || !waitingForDeallocation.isEmpty()) {
 				allocatedCorePool();
+				SleepUtil.sleep(5);
 			}
 			log.debug("AutoAllocator finished");
 		}
