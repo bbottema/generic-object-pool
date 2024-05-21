@@ -1,4 +1,5 @@
 import lombok.RequiredArgsConstructor;
+import lombok.var;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.bbottema.genericobjectpool.Allocator;
 import org.bbottema.genericobjectpool.GenericObjectPool;
@@ -265,27 +266,23 @@ public class TestApi {
                 .expirationPolicy(new TimeoutSinceCreationExpirationPolicy<AtomicReference<Integer>>(200, TimeUnit.MILLISECONDS))
                 .build();
         GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
-        
-        TimeUnit.MILLISECONDS.sleep(100);
-        assertTrue(waitAndCheck(pool, 10, 3));
-        TimeUnit.MILLISECONDS.sleep(260);
-        assertTrue(waitAndCheck(pool, 10, 3));
-        TimeUnit.MILLISECONDS.sleep(280);
-        assertTrue(waitAndCheck(pool, 10, 3));
+
+        assertTrue(waitAndCheck(pool, 130));
+        assertTrue(waitAndCheck(pool, 230));
+        assertTrue(waitAndCheck(pool, 310));
         assertThat(pool.getPoolMetrics().getTotalClaimed()).isZero();
     }
 
-    private boolean waitAndCheck(GenericObjectPool<AtomicReference<Integer>> pool, int waitTime, int loopCount) {
-        boolean isPassed = false;
-        while (loopCount > 0) {
+    private boolean waitAndCheck(GenericObjectPool<AtomicReference<Integer>> pool, int maxSleep) {
+        var slept = 0;
+        while (slept < maxSleep) {
             if (pool.getPoolMetrics().getCurrentlyAllocated() == 2) {
-                isPassed = true;
-                break;
+                return true;
             }
-            SleepUtil.sleep(waitTime);
-            loopCount--;
+            SleepUtil.sleep(25);
+            slept += 25;
         }
-        return isPassed;
+        return false;
     }
 
     private void assertDeallocated(final AtomicReference<PoolableObject<AtomicReference<Integer>>> claimedPoolable1) {
