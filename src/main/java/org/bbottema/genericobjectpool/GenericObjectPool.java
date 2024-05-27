@@ -1,6 +1,7 @@
 package org.bbottema.genericobjectpool;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import java.sql.Array;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.bbottema.genericobjectpool.util.SleepUtil;
@@ -266,24 +267,37 @@ public class GenericObjectPool<T> {
 			log.info("ExpirationPolicy set to NeverExpire, Skipping invalidation of expired objects!");
 			return;
 		}
-		int objectsInvalidated = invalidateExpiredObjects(expirationPolicy);
+		int objectsInvalidated = invalidateExpiredObjects(getExpiredObjects(expirationPolicy));
 		log.debug("{} objects invalidated as per expiration policy!", objectsInvalidated);
 	}
 
-	private int invalidateExpiredObjects(ExpirationPolicy<T> expirationPolicy) {
+	private int invalidateExpiredObjects(List<PoolableObject<T>> expiredObjects) {
 		int invalidatedObjects = 0;
 		claimLock.lock();
 		try {
-			for (final PoolableObject<T> poolableObject : available) {
-				if (expirationPolicy.hasExpired(poolableObject)) {
-					poolableObject.invalidate();
-					invalidatedObjects++;
-				}
+			for (final PoolableObject<T> poolableObject : expiredObjects) {
+				poolableObject.invalidate();
+				invalidatedObjects++;
 			}
 		} finally {
 			claimLock.unlock();
 		}
 		return invalidatedObjects;
+	}
+
+	private List<PoolableObject<T>> getExpiredObjects(ExpirationPolicy<T> expirationPolicy){
+		List<PoolableObject<T>> expiredObjects = new ArrayList<>();
+		claimLock.lock();
+		try {
+			for (final PoolableObject<T> poolableObject : available) {
+				if (expirationPolicy.hasExpired(poolableObject)) {
+					expiredObjects.add(poolableObject);
+				}
+			}
+		} finally {
+			claimLock.unlock();
+		}
+		return expiredObjects;
 	}
 
 	/**
