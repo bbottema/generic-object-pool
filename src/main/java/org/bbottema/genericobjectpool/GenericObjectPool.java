@@ -268,7 +268,9 @@ public class GenericObjectPool<T> {
 			return;
 		}
 		int objectsInvalidated = invalidateExpiredObjects(getExpiredObjects(expirationPolicy));
-		log.debug("{} objects invalidated as per expiration policy!", objectsInvalidated);
+        if (objectsInvalidated > 0) {
+			log.trace("{} objects invalidated as per expiration policy!", objectsInvalidated);
+        }
 	}
 
 	private int invalidateExpiredObjects(List<PoolableObject<T>> expiredObjects) {
