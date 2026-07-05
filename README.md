@@ -17,7 +17,7 @@ Maven Dependency Setup
 <dependency>
 	<groupId>com.github.bbottema</groupId>
 	<artifactId>generic-object-pool</artifactId>
-	<version>2.2.1</version>
+	<version>2.3.0</version>
 </dependency>
 ```
 
@@ -58,6 +58,25 @@ Claiming objects from the pool (blocking until timeout):
 ```java
 PoolableObject<Foo> obj = pool.claim(key, 1, TimeUnit.SECONDS); // null if timed out
 ````
+
+Claiming an already available object matching a predicate:
+```java
+PoolableObject<Foo> obj = pool.claimMatching(
+	poolable -> poolable.idleAgeMs() >= TimeUnit.MINUTES.toMillis(5),
+	1,
+	TimeUnit.SECONDS);
+
+if (obj != null) {
+	try {
+		obj.getAllocatedObject().ping();
+		obj.release();
+	} catch (IOException e) {
+		obj.invalidate();
+	}
+}
+````
+
+The predicate is evaluated while the pool claim lock is held, so keep it fast and side-effect free. Run slow work such as ping/keep-alive checks after the object has been claimed.
 
 Releasing Objects back to the Pool:
 ```java
@@ -145,6 +164,8 @@ metrics.getCurrentlyAllocated(); // available + claimed objects
 metrics.getTotalAllocated(); // total number of allocations during pool's existence
 metrics.getTotalClaimed(); // total number of claims during pool's existence
 ```
+
+For idle maintenance, `PoolableObject#idleAgeMs()` reports how long an object has been available for claiming. It returns 0 while the object is claimed.
 
 If for some reason you need to have more control over how threads are created, you can provide you own ThreadFactory:
 ```java

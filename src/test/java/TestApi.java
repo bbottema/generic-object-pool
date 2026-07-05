@@ -17,7 +17,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 import static java.util.Objects.requireNonNull;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -273,10 +275,127 @@ public class TestApi {
         assertThat(pool.getPoolMetrics().getTotalClaimed()).isZero();
     }
 
+    @Test
+    public void testClaimMatchingClaimsAvailableObject() throws InterruptedException {
+        final PoolConfig<AtomicReference<Integer>> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
+                .corePoolsize(2)
+                .maxPoolsize(2)
+                .build();
+        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
+
+        assertTrue(waitAndCheck(pool, 100));
+
+        PoolableObject<AtomicReference<Integer>> matchingClaim = pool.claimMatching(new Predicate<PoolableObject<AtomicReference<Integer>>>() {
+            @Override
+            public boolean test(PoolableObject<AtomicReference<Integer>> poolableObject) {
+                return poolableObject.getAllocatedObject().get() == 2;
+            }
+        }, 100, TimeUnit.MILLISECONDS);
+
+        assertThat(matchingClaim).isNotNull();
+        assertThat(requireNonNull(matchingClaim).getAllocatedObject().get()).isEqualTo(2);
+        assertThat(pool.getPoolMetrics().getCurrentlyClaimed()).isEqualTo(1);
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
+
+        matchingClaim.release();
+        pool.shutdown();
+    }
+
+    @Test
+    public void testClaimMatchingDoesNotAllocateNewObjects() throws InterruptedException {
+        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(
+                PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(2).build(),
+                new MyAllocator());
+
+        PoolableObject<AtomicReference<Integer>> matchingClaim = pool.claimMatching(new Predicate<PoolableObject<AtomicReference<Integer>>>() {
+            @Override
+            public boolean test(PoolableObject<AtomicReference<Integer>> poolableObject) {
+                return true;
+            }
+        }, 25, TimeUnit.MILLISECONDS);
+
+        assertThat(matchingClaim).isNull();
+        assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isZero();
+        assertThat(pool.getPoolMetrics().getTotalAllocated()).isZero();
+
+        pool.shutdown();
+    }
+
+    @Test
+    public void testClaimMatchingCanWaitForIdleAge() throws InterruptedException {
+        final PoolConfig<AtomicReference<Integer>> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
+                .corePoolsize(1)
+                .maxPoolsize(1)
+                .build();
+        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
+        final AtomicLong matchedIdleAgeMs = new AtomicLong();
+
+        assertTrue(waitAndCheck(pool, 100, 1));
+
+        PoolableObject<AtomicReference<Integer>> matchingClaim = pool.claimMatching(new Predicate<PoolableObject<AtomicReference<Integer>>>() {
+            @Override
+            public boolean test(PoolableObject<AtomicReference<Integer>> poolableObject) {
+                long idleAgeMs = poolableObject.idleAgeMs();
+                if (idleAgeMs >= 50) {
+                    matchedIdleAgeMs.set(idleAgeMs);
+                    return true;
+                }
+                return false;
+            }
+        }, 500, TimeUnit.MILLISECONDS);
+
+        assertThat(matchingClaim).isNotNull();
+        assertThat(matchedIdleAgeMs.get()).isGreaterThanOrEqualTo(50);
+        assertThat(requireNonNull(matchingClaim).idleAgeMs()).isZero();
+
+        matchingClaim.release();
+        pool.shutdown();
+    }
+
+    @Test
+    public void testClaimMatchingLeavesOtherAvailableObjectsClaimable() throws Exception {
+        final PoolConfig<AtomicReference<Integer>> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
+                .corePoolsize(2)
+                .maxPoolsize(2)
+                .build();
+        final GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
+        ExecutorService es = Executors.newSingleThreadExecutor();
+
+        assertTrue(waitAndCheck(pool, 100));
+
+        PoolableObject<AtomicReference<Integer>> maintenanceClaim = pool.claimMatching(new Predicate<PoolableObject<AtomicReference<Integer>>>() {
+            @Override
+            public boolean test(PoolableObject<AtomicReference<Integer>> poolableObject) {
+                return true;
+            }
+        }, 100, TimeUnit.MILLISECONDS);
+
+        Future<PoolableObject<AtomicReference<Integer>>> normalClaim = es.submit(new java.util.concurrent.Callable<PoolableObject<AtomicReference<Integer>>>() {
+            @Override
+            public PoolableObject<AtomicReference<Integer>> call() throws Exception {
+                return pool.claim(100, TimeUnit.MILLISECONDS);
+            }
+        });
+
+        PoolableObject<AtomicReference<Integer>> normalClaimResult = normalClaim.get(250, TimeUnit.MILLISECONDS);
+        assertThat(maintenanceClaim).isNotNull();
+        assertThat(normalClaimResult).isNotNull();
+        assertThat(normalClaimResult).isNotSameAs(maintenanceClaim);
+
+        normalClaimResult.release();
+        requireNonNull(maintenanceClaim).release();
+        es.shutdown();
+        pool.shutdown();
+    }
+
     private boolean waitAndCheck(GenericObjectPool<AtomicReference<Integer>> pool, int maxSleep) {
+        return waitAndCheck(pool, maxSleep, 2);
+    }
+
+    private boolean waitAndCheck(GenericObjectPool<AtomicReference<Integer>> pool, int maxSleep, int expectedAllocated) {
         var slept = 0;
         while (slept < maxSleep) {
-            if (pool.getPoolMetrics().getCurrentlyAllocated() == 2) {
+            if (pool.getPoolMetrics().getCurrentlyAllocated() == expectedAllocated) {
                 return true;
             }
             SleepUtil.sleep(25);

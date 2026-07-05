@@ -43,6 +43,7 @@ public class PoolableObject<T> {
 	 */
 	private final long creationStampMs;
 	private long allocationStampMs;
+	private long availableStampMs;
 	@NotNull @Getter private Map<ExpirationPolicy, Long> expiriesMs = new HashMap<>();
 	/**
 	 * Performance optimisation: this field keeps track of the list this poolable object is in, so we don't have to do {@code .contains(object)}
@@ -55,6 +56,7 @@ public class PoolableObject<T> {
 		this.allocatedObject = allocatedObject;
 		this.creationStampMs = System.currentTimeMillis();
 		this.allocationStampMs = creationStampMs;
+		this.availableStampMs = creationStampMs;
 		this.currentPoolStatus = AVAILABLE;
 	}
 
@@ -76,6 +78,10 @@ public class PoolableObject<T> {
 	void resetAllocationTimestamp() {
 		allocationStampMs = System.currentTimeMillis();
 	}
+
+	void resetAvailableTimestamp() {
+		availableStampMs = System.currentTimeMillis();
+	}
 	
 	/**
 	 * @return The numbers of milliseconds since this object was created.
@@ -90,6 +96,13 @@ public class PoolableObject<T> {
 	 */
 	public long allocationAgeMs() {
 		return System.currentTimeMillis() -  allocationStampMs;
+	}
+
+	/**
+	 * @return The number of milliseconds this object has been available for claiming, or 0 if it is not currently available.
+	 */
+	public long idleAgeMs() {
+		return currentPoolStatus == AVAILABLE ? System.currentTimeMillis() - availableStampMs : 0;
 	}
 	
 	@SuppressWarnings("unchecked")
