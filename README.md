@@ -17,7 +17,7 @@ Maven Dependency Setup
 <dependency>
 	<groupId>com.github.bbottema</groupId>
 	<artifactId>generic-object-pool</artifactId>
-	<version>2.3.0</version>
+	<version>2.4.0</version>
 </dependency>
 ```
 
