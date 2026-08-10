@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -121,6 +122,49 @@ public class SimpleSingleObjectPoolTest {
 		pool2.shutdown();
 
 		assertThatThrownBy(pool2::claim).isInstanceOf(IllegalStateException.class);
+	}
+
+	@Test
+	public void shutdownDoesNotCompleteWhileAllocatorIsStillDeallocating() throws Exception {
+		CountDownLatch deallocationStarted = new CountDownLatch(1);
+		CountDownLatch allowDeallocationToFinish = new CountDownLatch(1);
+		CountDownLatch deallocationFinished = new CountDownLatch(1);
+		GenericObjectPool<Boolean> pool = new GenericObjectPool<>(
+				PoolConfig.<Boolean>builder().maxPoolsize(1).build(),
+				new Allocator<Boolean>() {
+					@NotNull
+					@Override
+					public Boolean allocate() {
+						return true;
+					}
+
+					@Override
+					public void deallocate(Boolean object) {
+						deallocationStarted.countDown();
+						try {
+							allowDeallocationToFinish.await();
+						} catch (InterruptedException e) {
+							Thread.currentThread().interrupt();
+						} finally {
+							deallocationFinished.countDown();
+						}
+					}
+				});
+
+		try {
+			pool.claim().invalidate();
+			assertThat(deallocationStarted.await(1, TimeUnit.SECONDS)).isTrue();
+
+			Future<Void> shutdown = pool.shutdown();
+			assertThatThrownBy(() -> shutdown.get(100, TimeUnit.MILLISECONDS))
+					.isInstanceOf(TimeoutException.class);
+
+			allowDeallocationToFinish.countDown();
+			shutdown.get(1, TimeUnit.SECONDS);
+			assertThat(deallocationFinished.getCount()).isZero();
+		} finally {
+			allowDeallocationToFinish.countDown();
+		}
 	}
 	
 	/**

@@ -45,6 +45,7 @@ public class GenericObjectPool<T> {
 	@Nullable private volatile Future<Void> shutdownSequence;
 	
 	@NotNull private final AtomicInteger currentlyClaimed = new AtomicInteger();
+	@NotNull private final AtomicInteger currentlyDeallocating = new AtomicInteger();
 	@NotNull private final AtomicLong totalAllocated = new AtomicLong();
 	@NotNull private final AtomicLong totalClaimed = new AtomicLong();
 	
@@ -166,6 +167,7 @@ public class GenericObjectPool<T> {
 		deallocateLock.lock();
 		try {
 			if (!waitingForDeallocation.isEmpty()) {
+				currentlyDeallocating.incrementAndGet();
 				poolableObject = waitingForDeallocation.remove();
 			}
 		} finally {
@@ -186,6 +188,7 @@ public class GenericObjectPool<T> {
 				}
 			}
 			if (!waitingForDeallocation.isEmpty()) {
+				currentlyDeallocating.incrementAndGet();
 				poolableObject = waitingForDeallocation.remove();
 			}
 		} catch (InterruptedException e) {
@@ -424,7 +427,11 @@ public class GenericObjectPool<T> {
 			PoolableObject<T> poolableObject = shouldScheduleDeallocations ? getObjectForDeallocation() : waitForObjectForDeallocation();
 			final boolean deallocatedAnObject = poolableObject != null;
 			if (poolableObject != null) {
-				deallocate(poolableObject);
+				try {
+					deallocate(poolableObject);
+				} finally {
+					currentlyDeallocating.decrementAndGet();
+				}
 			}
 			if (!deallocatedAnObject && shouldScheduleDeallocations) {
 				scheduleDeallocations();
@@ -491,6 +498,7 @@ public class GenericObjectPool<T> {
 		
 		private void waitUntilShutDown() {
 			while (currentlyClaimed.get() > 0 ||
+					currentlyDeallocating.get() > 0 ||
 					objectAvailableConditions.size() > 0 ||
 					available.size() > 0 ||
 					waitingForDeallocation.size() > 0) {
