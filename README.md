@@ -26,7 +26,7 @@ For JPMS applications, the published JAR declares the stable automatic module na
 
 ## Release Notes
 
-Unreleased 2.4.2
+2.4.2 (11 August 2026)
 
 - [#14](https://github.com/bbottema/generic-object-pool/issues/14): Declare the stable JPMS automatic module name `org.bbottema.genericobjectpool`.
 
