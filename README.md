@@ -17,9 +17,18 @@ Maven Dependency Setup
 <dependency>
 	<groupId>com.github.bbottema</groupId>
 	<artifactId>generic-object-pool</artifactId>
-	<version>2.4.0</version>
+	<version>2.4.2</version>
 </dependency>
 ```
+
+For JPMS applications, the published JAR declares the stable automatic module name
+`org.bbottema.genericobjectpool`.
+
+## Release Notes
+
+Unreleased 2.4.2
+
+- [#14](https://github.com/bbottema/generic-object-pool/issues/14): Declare the stable JPMS automatic module name `org.bbottema.genericobjectpool`.
 
 ## Usage
 

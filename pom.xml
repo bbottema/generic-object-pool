@@ -18,6 +18,7 @@
 	<inceptionYear>2019</inceptionYear>
 
 	<properties>
+		<automaticModuleName>org.bbottema.genericobjectpool</automaticModuleName>
 		<license.owner.name>Benny Bottema</license.owner.name>
 		<license.owner.email>benny@bennybottema.com</license.owner.email>
 	</properties>
@@ -46,6 +47,53 @@
 
 	<build>
 		<plugins>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-jar-plugin</artifactId>
+				<version>3.4.2</version>
+				<configuration>
+					<archive>
+						<manifestEntries>
+							<Automatic-Module-Name>${automaticModuleName}</Automatic-Module-Name>
+						</manifestEntries>
+					</archive>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-antrun-plugin</artifactId>
+				<version>3.1.0</version>
+				<executions>
+					<execution>
+						<id>verify-automatic-module-name</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>run</goal>
+						</goals>
+						<configuration>
+							<target>
+								<delete dir="${project.build.directory}/module-name-verification" quiet="true" />
+								<unzip src="${project.build.directory}/${project.build.finalName}.jar"
+									   dest="${project.build.directory}/module-name-verification">
+									<patternset>
+										<include name="META-INF/MANIFEST.MF" />
+									</patternset>
+								</unzip>
+								<loadfile property="packagedManifest"
+										  srcFile="${project.build.directory}/module-name-verification/META-INF/MANIFEST.MF" />
+								<fail message="Packaged JAR is missing Automatic-Module-Name: ${automaticModuleName}">
+									<condition>
+										<not>
+											<contains string="${packagedManifest}"
+													  substring="Automatic-Module-Name: ${automaticModuleName}" />
+										</not>
+									</condition>
+								</fail>
+							</target>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
 			<plugin>
 				<groupId>org.sonatype.plugins</groupId>
 				<artifactId>nexus-staging-maven-plugin</artifactId>
