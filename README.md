@@ -9,6 +9,14 @@ generic-object-pool is a lightweight generic object pool, providing object lifec
 metrics, claim / release mechanism and object invalidation, as well as auto initialize a core pool and 
 auto expiry policies.
 
+## Origins
+
+The work that became generic-object-pool began in June 2019 with a fork of
+[KBOP](https://github.com/gondor/kbop), created by Jeremy Unruh. It was subsequently modernized and
+extensively redesigned for Simple Java Mail's SMTP connection pooling, and has continued as an
+independent library. KBOP's original work is used under the MIT License; its complete copyright and
+license notice is included in [NOTICE.txt](NOTICE.txt).
+
 ## Setup
 
 Maven Dependency Setup
