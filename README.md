@@ -25,7 +25,7 @@ Maven Dependency Setup
 <dependency>
 	<groupId>com.github.bbottema</groupId>
 	<artifactId>generic-object-pool</artifactId>
-	<version>2.4.2</version>
+	<version>2.4.3</version>
 </dependency>
 ```
 
@@ -34,9 +34,12 @@ For JPMS applications, the published JAR declares the stable automatic module na
 
 ## Release Notes
 
-2.4.2 (11 August 2026)
+2.4.3 (7 September 2026)
 
-- [#14](https://github.com/bbottema/generic-object-pool/issues/14): Declare the stable JPMS automatic module name `org.bbottema.genericobjectpool`.
+- [#20](https://github.com/bbottema/generic-object-pool/issues/20): Wake already-blocked claimers when invalidation frees capacity or the core pool adds replacements. These callers no longer need another release to make progress.
+- Concurrent invalidation of the same object now schedules cleanup only once and preserves pool counts.
+- Shutdown no longer observes the gap between invalidation and queued cleanup as an empty pool.
+- The public API, Java 8 baseline and JPMS module name are unchanged.
 
 ## Usage
 
@@ -48,7 +51,7 @@ PoolConfig<Foo> poolConfig = PoolConfig.<Foo>builder()
    .maxPoolsize(10)
    .build();
 
-GenericObjectPool<Foo> pool = new SimpleObjectPool<>(poolConfig, new MyFooAllocator());
+GenericObjectPool<Foo> pool = new GenericObjectPool<>(poolConfig, new MyFooAllocator());
 ```
 
 ```java
@@ -60,7 +63,7 @@ PoolConfig<Foo> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
    .expirationPolicy(new TimeoutSinceLastAllocationExpirationPolicy<Foo>(30, TimeUnit.SECONDS))
    .build();
 
-GenericObjectPool<Foo> pool = new SimpleObjectPool<>(poolConfig, new MyFooAllocator());
+GenericObjectPool<Foo> pool = new GenericObjectPool<>(poolConfig, new MyFooAllocator());
 ````
 
 #### Claim / release API
@@ -73,7 +76,7 @@ PoolableObject<Foo> obj = pool.claim();
 
 Claiming objects from the pool (blocking until timeout):
 ```java
-PoolableObject<Foo> obj = pool.claim(key, 1, TimeUnit.SECONDS); // null if timed out
+PoolableObject<Foo> obj = pool.claim(1, TimeUnit.SECONDS); // null if timed out
 ````
 
 Claiming an already available object matching a predicate:
@@ -102,6 +105,11 @@ obj.release(); // make available for reuse
 // or
 obj.invalidate(); // remove from pool, deallocating
 ````
+
+Invalidation wakes ordinary callers that are already waiting for capacity. With a core size of zero, a waiting
+caller can create a replacement; a configured core pool also replenishes itself. Final cleanup remains asynchronous
+and need not finish before a replacement can be used. Matching claims still only take available objects: they do not
+allocate replacements themselves.
 
 #### Shutting down a pool
 
