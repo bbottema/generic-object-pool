@@ -1,150 +1,134 @@
 package org.bbottema.genericobjectpool;
 
-import org.assertj.core.api.Assertions;
-import org.jetbrains.annotations.NotNull;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.bbottema.genericobjectpool.ObjectPoolTestHelper.createAllocator;
+import static org.bbottema.genericobjectpool.PoolTestResources.await;
+import static org.bbottema.genericobjectpool.PoolTestResources.result;
 
 public class SimpleSingleObjectPoolTest {
 
-	private GenericObjectPool<String> pool1, pool2;
-	
+	private final PoolTestResources resources = new PoolTestResources();
+	private GenericObjectPool<String> pool1;
+	private GenericObjectPool<String> pool2;
+
 	@BeforeEach
 	public void setup() {
-		pool1 = new GenericObjectPool<>(PoolConfig.<String>builder().maxPoolsize(1).build(), createAllocator("a"));
-		pool2 = new GenericObjectPool<>(PoolConfig.<String>builder().maxPoolsize(1).build(), createAllocator("b"));
+		pool1 = resources.pool(PoolConfig.<String>builder().maxPoolsize(1).build(), createAllocator("a"));
+		pool2 = resources.pool(PoolConfig.<String>builder().maxPoolsize(1).build(), createAllocator("b"));
 	}
-	
+
+	@AfterEach
+	public void cleanUp() throws Exception {
+		resources.close();
+	}
+
 	@Test
 	public void waitForObjectWithTimeoutTest() throws Exception {
-		singleClaimAndRelease();
-
-		PoolableObject<String> obj = pool2.claim();
-		try {
-			ExecutorService es = Executors.newSingleThreadExecutor();
-			Future<?> f = es.submit(new Runnable() {
-				public void run() {
-					try {
-						PoolableObject<String> obj = pool2.claim(500, TimeUnit.MILLISECONDS);
-						if (obj == null) {
-							throw new TimeoutException();
-						}
-						obj.release();
-						fail("Object was obtained");
-					} catch (Exception e) {
-						if (!(e instanceof TimeoutException)) {
-							fail(e.getMessage(), e);
-						}
-					}
-				}
-				
-			});
-			
-			obj.release();
-			assertThat(pool2.claim()).isNotNull();
-			
-			// block until thread is done
-			f.get();
-		} finally {
-			obj.release();
-		}
+		final PoolableObject<String> held = resources.remember(pool2.claim());
+		final Future<PoolableObject<String>> waiting = resources.workers.submit(() ->
+				resources.remember(pool2.claim(200, TimeUnit.MILLISECONDS)));
+		await("caller is blocked", () -> pool2.getPoolMetrics().getCurrentlyWaitingCount() == 1);
+		assertThat(result(waiting)).isNull();
+		assertThat(pool2.getPoolMetrics().getCurrentlyWaitingCount()).isZero();
+		held.release();
+		assertThat(resources.remember(pool2.claim())).isSameAs(held);
 	}
-	
+
 	@Test
 	public void manyThreadsBlockingUntilObtainedPool2() throws Exception {
-		waitForObjectWithTimeoutTest();
-		
-		Runnable r = new Runnable() {
-			public void run() {
-				PoolableObject<String> obj = null;
+		final PoolableObject<String> held = resources.remember(pool2.claim());
+		final List<Future<?>> waiting = new ArrayList<>();
+		for (int i = 0; i < 10; i++) {
+			waiting.add(resources.workers.submit(() -> {
+				final PoolableObject<String> lease = resources.remember(pool2.claim(3, TimeUnit.SECONDS));
+				assertThat(lease).isNotNull();
 				try {
-					obj = pool2.claim();
-					assertThat(obj).isNotNull();
-					Thread.sleep(20);
-					assertThat(pool2.claim()).isNotNull();
-				} catch (Exception e) {
-					fail("Failed to obtain Object: " + Thread.currentThread().getName(), e);
+					assertThat(pool2.getPoolMetrics().getCurrentlyClaimed()).isEqualTo(1);
 				} finally {
-					if (obj != null)
-						obj.release();
+					lease.release();
 				}
-			}
-		};
-		ExecutorService es = Executors.newFixedThreadPool(10);
-		for (int i = 0; i < 10; i++)
-			es.submit(r);
-		es.shutdown();
-		es.awaitTermination(2, TimeUnit.SECONDS);
+				return null;
+			}));
+		}
+		await("all ten callers are blocked", () -> pool2.getPoolMetrics().getCurrentlyWaitingCount() == 10);
+		held.release();
+		for (final Future<?> worker : waiting) {
+			result(worker);
+		}
+		assertThat(pool2.getPoolMetrics().getTotalClaimed()).isEqualTo(11);
+		assertThat(pool2.getPoolMetrics().getCurrentlyWaitingCount()).isZero();
 		verifyPool1RemainsUnaffected();
 	}
-	
+
 	@Test
 	public void singleClaimAndRelease() throws Exception {
-		PoolableObject<String> obj = pool2.claim();
-		assertThat(obj).isNotNull();
-		pool2.releasePoolableObject(obj);
+		final PoolableObject<String> lease = resources.remember(pool2.claim());
+		assertThat(lease).isNotNull();
+		lease.release();
+		assertThat(pool2.getPoolMetrics().getCurrentlyClaimed()).isZero();
 		verifyPool1RemainsUnaffected();
 	}
-	
+
+	@Test
+	public void verifyPool1RemainsUnaffectedAfterClaimingPool2() throws Exception {
+		resources.remember(pool2.claim()).invalidate();
+		assertThat(pool2.getPoolMetrics().getTotalClaimed()).isEqualTo(1);
+		verifyPool1RemainsUnaffected();
+	}
+
 	private void verifyPool1RemainsUnaffected() {
-		PoolMetrics metrics = pool1.getPoolMetrics();
-		assertThat(metrics).isNotNull();
+		final PoolMetrics metrics = pool1.getPoolMetrics();
 		assertThat(metrics.getCurrentlyClaimed()).isZero();
 		assertThat(metrics.getCurrentlyWaitingCount()).isZero();
 		assertThat(metrics.getTotalAllocated()).isZero();
 		assertThat(metrics.getTotalClaimed()).isZero();
 	}
-	
-	@Test
-	public void verifyPool1RemainsUnaffectedAfterClaimingPool2() throws Exception {
-		manyThreadsBlockingUntilObtainedPool2();
-		verifyPool1RemainsUnaffected();
-	}
-	
-	/**
-	 * Tests shutting down the pool and not allowing any more allocations
-	 */
+
 	@Test
 	public void testShutdown() throws Exception {
-		verifyPool1RemainsUnaffectedAfterClaimingPool2();
-		
-		pool1.shutdown();
-		pool2.shutdown();
-
+		resources.remember(pool2.claim()).release();
+		result(pool1.shutdown());
+		result(pool2.shutdown());
 		assertThatThrownBy(pool2::claim).isInstanceOf(IllegalStateException.class);
 	}
 
 	@Test
 	public void shutdownDoesNotCompleteWhileAllocatorIsStillDeallocating() throws Exception {
-		CountDownLatch deallocationStarted = new CountDownLatch(1);
-		CountDownLatch allowDeallocationToFinish = new CountDownLatch(1);
-		CountDownLatch deallocationFinished = new CountDownLatch(1);
-		GenericObjectPool<Boolean> pool = new GenericObjectPool<>(
+		final CountDownLatch deallocationStarted = new CountDownLatch(1);
+		final CountDownLatch allowDeallocationToFinish = new CountDownLatch(1);
+		final CountDownLatch deallocationFinished = new CountDownLatch(1);
+		final GenericObjectPool<Boolean> pool = resources.pool(
 				PoolConfig.<Boolean>builder().maxPoolsize(1).build(),
 				new Allocator<Boolean>() {
-					@NotNull
 					@Override
 					public Boolean allocate() {
 						return true;
 					}
 
 					@Override
-					public void deallocate(Boolean object) {
+					public void deallocate(final Boolean object) {
 						deallocationStarted.countDown();
 						try {
-							allowDeallocationToFinish.await();
-						} catch (InterruptedException e) {
+							if (!allowDeallocationToFinish.await(5, TimeUnit.SECONDS)) {
+								throw new AssertionError("cleanup latch timed out");
+							}
+						} catch (final InterruptedException e) {
 							Thread.currentThread().interrupt();
+							throw new AssertionError(e);
 						} finally {
 							deallocationFinished.countDown();
 						}
@@ -152,92 +136,82 @@ public class SimpleSingleObjectPoolTest {
 				});
 
 		try {
-			pool.claim().invalidate();
-			assertThat(deallocationStarted.await(1, TimeUnit.SECONDS)).isTrue();
-
-			Future<Void> shutdown = pool.shutdown();
-			assertThatThrownBy(() -> shutdown.get(100, TimeUnit.MILLISECONDS))
-					.isInstanceOf(TimeoutException.class);
-
+			resources.remember(pool.claim()).invalidate();
+			assertThat(deallocationStarted.await(5, TimeUnit.SECONDS)).isTrue();
+			final Future<Void> shutdown = pool.shutdown();
+			assertThatThrownBy(() -> shutdown.get(100, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
 			allowDeallocationToFinish.countDown();
-			shutdown.get(1, TimeUnit.SECONDS);
+			result(shutdown);
 			assertThat(deallocationFinished.getCount()).isZero();
 		} finally {
 			allowDeallocationToFinish.countDown();
 		}
 	}
-	
-	/**
-	 * Tests the Allocator Lifecycle to insure the pool is calling allocator during each phase within the objects lifecycle
-	 */
+
 	@Test
 	public void testObjectLifecycle() throws Exception {
-		TestLifecycleAllocator allocator = new TestLifecycleAllocator();
-		GenericObjectPool<Boolean> pool = new GenericObjectPool<>(PoolConfig.<Boolean>builder().maxPoolsize(1).build(), allocator);
-		
-		assertStatistics(pool, allocator);
+		assertLifecycle(false);
 	}
-	
-	/**
-	 * Deallocation throws an error, but that should not prevent the deallocation cycle from breaking, causing a memory leak to boot.
-	 */
+
 	@Test
 	public void testThreadLeakFixGitHub() throws Exception {
-		TestLifecycleAllocator allocator = new TestLifecycleAllocator() {
-			@Override
-			public void deallocate(Boolean object) {
-				super.deallocate(object);
-				throw new RuntimeException("deallocation fail");
-			}
-		};
-		GenericObjectPool<Boolean> pool = new GenericObjectPool<>(PoolConfig.<Boolean>builder().maxPoolsize(1).build(), allocator);
-		
-		assertStatistics(pool, allocator);
+		assertLifecycle(true);
 	}
-	
-	private void assertStatistics(GenericObjectPool<Boolean> pool, TestLifecycleAllocator allocator) throws InterruptedException {
-		PoolableObject<Boolean> obj = pool.claim();
-		obj.release();
-		obj = pool.claim();
-		obj.invalidate();
-		
-		assertThat(allocator.lifecycleCount).isEqualTo(3);
-		TimeUnit.MILLISECONDS.sleep(100);
-		assertThat(allocator.lifecycleCount).isEqualTo(4);
-		
-		assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(0);
-		
-		obj = pool.claim();
-		obj.release();
-		obj = pool.claim();
-		obj.invalidate();
-		
-		assertThat(allocator.lifecycleCount).isEqualTo(7);
-		TimeUnit.MILLISECONDS.sleep(100);
-		assertThat(allocator.lifecycleCount).isEqualTo(8);
-		
-		assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(0);
+
+	private void assertLifecycle(final boolean failCleanup) throws Exception {
+		final TestLifecycleAllocator allocator = new TestLifecycleAllocator(failCleanup);
+		final GenericObjectPool<Boolean> pool = resources.pool(
+				PoolConfig.<Boolean>builder().maxPoolsize(1).build(), allocator);
+		for (int round = 1; round <= 2; round++) {
+			final PoolableObject<Boolean> lease = resources.remember(pool.claim());
+			lease.release();
+			assertThat(resources.remember(pool.claim())).isSameAs(lease);
+			lease.invalidate();
+			assertThat(allocator.cleanupCompleted.tryAcquire(5, TimeUnit.SECONDS)).isTrue();
+			assertThat(allocator.allocations.get()).isEqualTo(round);
+			assertThat(allocator.reuses.get()).isEqualTo(round);
+			assertThat(allocator.returns.get()).isEqualTo(round);
+			assertThat(allocator.deallocations.get()).isEqualTo(round);
+			assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isZero();
+		}
+		result(pool.shutdown());
 	}
-	
-	static class TestLifecycleAllocator extends Allocator<Boolean> {
-		int lifecycleCount;
-		
-		@NotNull
+
+	private static final class TestLifecycleAllocator extends Allocator<Boolean> {
+		private final boolean failCleanup;
+		private final AtomicInteger allocations = new AtomicInteger();
+		private final AtomicInteger reuses = new AtomicInteger();
+		private final AtomicInteger returns = new AtomicInteger();
+		private final AtomicInteger deallocations = new AtomicInteger();
+		private final Semaphore cleanupCompleted = new Semaphore(0);
+
+		private TestLifecycleAllocator(final boolean failCleanup) {
+			this.failCleanup = failCleanup;
+		}
+
+		@Override
 		public Boolean allocate() {
-			lifecycleCount++;
+			allocations.incrementAndGet();
 			return true;
 		}
-		
-		public void allocateForReuse(Boolean object) {
-			lifecycleCount++;
+
+		@Override
+		public void allocateForReuse(final Boolean object) {
+			reuses.incrementAndGet();
 		}
-		
-		public void deallocateForReuse(Boolean object) {
-			lifecycleCount++;
+
+		@Override
+		public void deallocateForReuse(final Boolean object) {
+			returns.incrementAndGet();
 		}
-		
-		public void deallocate(Boolean object) {
-			lifecycleCount++;
+
+		@Override
+		public void deallocate(final Boolean object) {
+			deallocations.incrementAndGet();
+			cleanupCompleted.release();
+			if (failCleanup) {
+				throw new IllegalStateException("scripted cleanup failure");
+			}
 		}
 	}
 }

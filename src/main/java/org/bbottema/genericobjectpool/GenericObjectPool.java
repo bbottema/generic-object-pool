@@ -141,13 +141,15 @@ public class GenericObjectPool<T> {
 				currentlyClaimed.decrementAndGet();
 			} else if (claimedObject.getCurrentPoolStatus() == PoolableObject.PoolStatus.AVAILABLE) {
 				available.remove(claimedObject);
+			} else {
+				return;
 			}
+			// Publish invalidation before another release/invalidation can observe the old state.
+			addObjectForDeallocation(claimedObject);
+			// Waiting ordinary claims can now allocate a replacement, including in a lazy pool.
+			signalAllWaitingClaimers();
 		} finally {
 			claimLock.unlock();
-		}
-
-		if (claimedObject.getCurrentPoolStatus().ordinal() < PoolableObject.PoolStatus.WAITING_FOR_DEALLOCATION.ordinal()) {
-			addObjectForDeallocation(claimedObject);
 		}
 	}
 
@@ -461,14 +463,20 @@ public class GenericObjectPool<T> {
 
 		private void allocatedCorePool() {
 			claimLock.lock();
+			boolean addedObject = false;
 			try {
 				while (getCurrentlyAllocated() < poolConfig.getCorePoolsize() && !isShuttingDown()) {
 					available.addLast(new PoolableObject<>(GenericObjectPool.this, allocator.allocate()));
 					totalAllocated.incrementAndGet();
+					addedObject = true;
 				}
 			} catch (Exception e) {
 				log.error("Not able to allocate new object! This might be a temporary issue due to external reasons (a server rejecting a connection for example).", e);
 			} finally {
+				// Earlier allocations remain usable even if a later allocation in this batch failed.
+				if (addedObject) {
+					signalAllWaitingClaimers();
+				}
 				claimLock.unlock();
 			}
 		}
@@ -497,12 +505,25 @@ public class GenericObjectPool<T> {
 		}
 		
 		private void waitUntilShutDown() {
-			while (currentlyClaimed.get() > 0 ||
-					currentlyDeallocating.get() > 0 ||
-					objectAvailableConditions.size() > 0 ||
-					available.size() > 0 ||
-					waitingForDeallocation.size() > 0) {
+			while (hasOutstandingWork()) {
 				SleepUtil.sleep(10);
+			}
+		}
+
+		private boolean hasOutstandingWork() {
+			// Observe the claim-to-queue and queue-to-cleanup hand-offs as one consistent snapshot.
+			// Always take these locks in the same order as invalidation.
+			claimLock.lock();
+			try {
+				deallocateLock.lock();
+				try {
+					return currentlyClaimed.get() > 0 || currentlyDeallocating.get() > 0
+							|| !objectAvailableConditions.isEmpty() || !available.isEmpty() || !waitingForDeallocation.isEmpty();
+				} finally {
+					deallocateLock.unlock();
+				}
+			} finally {
+				claimLock.unlock();
 			}
 		}
 	}

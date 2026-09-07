@@ -68,8 +68,9 @@ public class PoolableObject<T> {
 	}
 
 	/**
-	 * Releases the object from the pool and removes it.  If the key associated with this object no longer has available object(s) to claim against depending on the Pool Configuration then a new
-	 * object will be created on the next request.
+	 * Removes this object from the pool and schedules its final cleanup. Waiting ordinary claimers are notified that
+	 * capacity is available, so they can allocate a replacement; a configured core pool also replenishes itself.
+	 * Cleanup runs asynchronously and does not have to finish before a replacement can be claimed.
 	 */
 	public void invalidate() {
 		pool.invalidatePoolableObject(this);

@@ -10,9 +10,10 @@ import org.bbottema.genericobjectpool.expirypolicies.TimeoutSinceCreationExpirat
 import org.bbottema.genericobjectpool.util.SleepUtil;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.bbottema.genericobjectpool.PoolTestResources;
 
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -25,21 +26,29 @@ import static java.util.Objects.requireNonNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.bbottema.genericobjectpool.PoolTestResources.await;
+import static org.bbottema.genericobjectpool.PoolTestResources.result;
 
 public class TestApi {
+    private final PoolTestResources resources = new PoolTestResources();
+
+    @AfterEach
+    public void cleanUp() throws Exception {
+        resources.close();
+    }
     
     @Test
     public void testPublicAPI() throws Exception {
         final PoolConfig<AtomicReference<Integer>> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
                 .maxPoolsize(3)
                 .build();
-        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
+        GenericObjectPool<AtomicReference<Integer>> pool = resources.pool(poolConfig, new MyAllocator());
         
-        PoolableObject<AtomicReference<Integer>> obj1 = pool.claim();
-        PoolableObject<AtomicReference<Integer>> obj2 = pool.claim();
-        PoolableObject<AtomicReference<Integer>> obj3 = pool.claim();
+        PoolableObject<AtomicReference<Integer>> obj1 = resources.remember(pool.claim());
+        PoolableObject<AtomicReference<Integer>> obj2 = resources.remember(pool.claim());
+        PoolableObject<AtomicReference<Integer>> obj3 = resources.remember(pool.claim());
         
-        PoolableObject<AtomicReference<Integer>> obj4 = pool.claim(100, TimeUnit.MILLISECONDS);
+        PoolableObject<AtomicReference<Integer>> obj4 = resources.remember(pool.claim(100, TimeUnit.MILLISECONDS));
         
         assertThat(obj1).isNotNull();
         assertThat(obj2).isNotNull();
@@ -47,23 +56,23 @@ public class TestApi {
         assertThat(obj4).isNull();
         
         obj1.release();
-        obj4 = pool.claim(100, TimeUnit.MILLISECONDS);
-        PoolableObject<AtomicReference<Integer>> obj5 = pool.claim(100, TimeUnit.MILLISECONDS);
+        obj4 = resources.remember(pool.claim(100, TimeUnit.MILLISECONDS));
+        PoolableObject<AtomicReference<Integer>> obj5 = resources.remember(pool.claim(100, TimeUnit.MILLISECONDS));
         
         assertThat(obj4).isNotNull();
         assertThat(obj5).isNull();
         
         obj3.invalidate();
-        obj5 = pool.claim(100, TimeUnit.MILLISECONDS);
+        obj5 = resources.remember(pool.claim(100, TimeUnit.MILLISECONDS));
         
         assertThat(obj5).isNotNull();
     }
     
     @Test
     public void testShutdownWithWaitingThreads() throws Exception {
-        final GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(1).build(), new MyAllocator());
+        final GenericObjectPool<AtomicReference<Integer>> pool = resources.pool(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(1).build(), new MyAllocator());
         
-        ExecutorService es = Executors.newSingleThreadExecutor();
+        ExecutorService es = resources.singleWorker();
         
         AtomicReference<PoolableObject<AtomicReference<Integer>>> claimedPoolable1 = new AtomicReference<>();
         AtomicReference<PoolableObject<AtomicReference<Integer>>> claimedPoolable2 = new AtomicReference<>();
@@ -72,9 +81,8 @@ public class TestApi {
     
         AtomicReference<Future<?>> claimer2Ref = claimInNewThread(pool, es, claimedPoolable2);
     
-        while (!claimer1Ref.get().isDone()) {
-            TimeUnit.MILLISECONDS.sleep(10);
-        }
+        result(claimer1Ref.get());
+        await("second caller is blocked", () -> pool.getPoolMetrics().getCurrentlyWaitingCount() == 1);
         
         assertThat(claimer2Ref.get()).isNotCancelled();
         assertThat(claimer2Ref.get()).isNotDone();
@@ -85,7 +93,7 @@ public class TestApi {
         assertThat(claimedPoolable2.get()).isNull();
         
         final Future<?> shutdownResult = pool.shutdown();
-        TimeUnit.MILLISECONDS.sleep(100);
+        await("waiting caller cancelled by shutdown", () -> claimer2Ref.get().isCancelled());
         
         assertThat(claimer1Ref.get()).as("claimer1").isDone();
         assertThat(claimer2Ref.get()).as("claimer2").isCancelled();
@@ -95,7 +103,7 @@ public class TestApi {
         
         assertThatThrownBy(new FutureGet(shutdownResult, 100, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
         claimedPoolable1.get().release();
-        shutdownResult.get(100, TimeUnit.MILLISECONDS);
+        shutdownResult.get(5, TimeUnit.SECONDS);
         assertThat(shutdownResult).isDone();
         
         // verify the object was deallocated
@@ -107,9 +115,9 @@ public class TestApi {
     
     @Test
     public void testShutdownWithAvailableObjects() throws Exception {
-        final GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(2).build(), new MyAllocator());
+        final GenericObjectPool<AtomicReference<Integer>> pool = resources.pool(PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(2).build(), new MyAllocator());
         
-        ExecutorService es = Executors.newSingleThreadExecutor();
+        ExecutorService es = resources.singleWorker();
         
         AtomicReference<PoolableObject<AtomicReference<Integer>>> claimedPoolable1 = new AtomicReference<>();
         AtomicReference<PoolableObject<AtomicReference<Integer>>> claimedPoolable2 = new AtomicReference<>();
@@ -118,9 +126,8 @@ public class TestApi {
         AtomicReference<Future<?>> claimer2Ref = claimInNewThread(pool, es, claimedPoolable2);
     
         
-        while (!claimer1Ref.get().isDone() || !claimer2Ref.get().isDone()) {
-            TimeUnit.MILLISECONDS.sleep(10);
-        }
+        result(claimer1Ref.get());
+        result(claimer2Ref.get());
     
         final PoolableObject<AtomicReference<Integer>> poolableObj1 = claimedPoolable1.get();
         final PoolableObject<AtomicReference<Integer>> poolableObj2 = claimedPoolable2.get();
@@ -135,7 +142,7 @@ public class TestApi {
         poolableObj1.release();
         
         final Future<?> shutdownResult = pool.shutdown();
-        TimeUnit.MILLISECONDS.sleep(100);
+        await("available object deallocated", () -> isDeallocated(poolableObj1));
         
         assertThat(claimer1Ref.get()).as("claimer1").isDone();
         assertThat(claimer2Ref.get()).as("claimer2").isDone();
@@ -146,7 +153,7 @@ public class TestApi {
         
         poolableObj2.release();
     
-        shutdownResult.get(100, TimeUnit.MILLISECONDS);
+        shutdownResult.get(5, TimeUnit.SECONDS);
         assertThat(shutdownResult).isDone();
         
         // verify the object was deallocated
@@ -183,14 +190,14 @@ public class TestApi {
     }
     
     @RequiredArgsConstructor
-    private static class ConcurrentClaimer implements Runnable {
+    private class ConcurrentClaimer implements Runnable {
         @NotNull private final GenericObjectPool<AtomicReference<Integer>> pool;
         @NotNull private final AtomicReference<PoolableObject<AtomicReference<Integer>>> claimedPoolable;
         @NotNull private final AtomicReference<Future<?>> claimer1Ref;
         
         public void run() {
             try {
-                claimedPoolable.set(pool.claim());
+                claimedPoolable.set(resources.remember(pool.claim()));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 claimer1Ref.get().cancel(false);
@@ -214,14 +221,14 @@ public class TestApi {
     public void testLazyLoading() throws InterruptedException {
         final PoolConfig<AtomicReference<Integer>> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
                 .maxPoolsize(3).build();
-        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
+        GenericObjectPool<AtomicReference<Integer>> pool = resources.pool(poolConfig, new MyAllocator());
         
         TimeUnit.MILLISECONDS.sleep(50);
         assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isZero();
-        pool.claim();
+        resources.remember(pool.claim());
         TimeUnit.MILLISECONDS.sleep(50);
         assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(1);
-        pool.claim();
+        resources.remember(pool.claim());
         TimeUnit.MILLISECONDS.sleep(50);
         assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
         assertThat(pool.getPoolMetrics().getTotalClaimed()).isEqualTo(2);
@@ -232,17 +239,17 @@ public class TestApi {
         final PoolConfig<AtomicReference<Integer>> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
                 .corePoolsize(2)
                 .maxPoolsize(3).build();
-        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
+        GenericObjectPool<AtomicReference<Integer>> pool = resources.pool(poolConfig, new MyAllocator());
         
         TimeUnit.MILLISECONDS.sleep(50);
         assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
-        PoolableObject<AtomicReference<Integer>> claim1 = requireNonNull(pool.claim());
+        PoolableObject<AtomicReference<Integer>> claim1 = requireNonNull(resources.remember(pool.claim()));
         TimeUnit.MILLISECONDS.sleep(50);
         assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
-        PoolableObject<AtomicReference<Integer>> claim2 = requireNonNull(pool.claim());
+        PoolableObject<AtomicReference<Integer>> claim2 = requireNonNull(resources.remember(pool.claim()));
         TimeUnit.MILLISECONDS.sleep(50);
         assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(2);
-        PoolableObject<AtomicReference<Integer>> claim3 = requireNonNull(pool.claim());
+        PoolableObject<AtomicReference<Integer>> claim3 = requireNonNull(resources.remember(pool.claim()));
         TimeUnit.MILLISECONDS.sleep(50);
         assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isEqualTo(3);
         
@@ -267,7 +274,7 @@ public class TestApi {
                 .maxPoolsize(3)
                 .expirationPolicy(new TimeoutSinceCreationExpirationPolicy<AtomicReference<Integer>>(200, TimeUnit.MILLISECONDS))
                 .build();
-        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
+        GenericObjectPool<AtomicReference<Integer>> pool = resources.pool(poolConfig, new MyAllocator());
 
         assertTrue(waitAndCheck(pool, 130));
         assertTrue(waitAndCheck(pool, 230));
@@ -281,16 +288,16 @@ public class TestApi {
                 .corePoolsize(2)
                 .maxPoolsize(2)
                 .build();
-        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
+        GenericObjectPool<AtomicReference<Integer>> pool = resources.pool(poolConfig, new MyAllocator());
 
         assertTrue(waitAndCheck(pool, 100));
 
-        PoolableObject<AtomicReference<Integer>> matchingClaim = pool.claimMatching(new Predicate<PoolableObject<AtomicReference<Integer>>>() {
+        PoolableObject<AtomicReference<Integer>> matchingClaim = resources.remember(pool.claimMatching(new Predicate<PoolableObject<AtomicReference<Integer>>>() {
             @Override
             public boolean test(PoolableObject<AtomicReference<Integer>> poolableObject) {
                 return poolableObject.getAllocatedObject().get() == 2;
             }
-        }, 100, TimeUnit.MILLISECONDS);
+        }, 100, TimeUnit.MILLISECONDS));
 
         assertThat(matchingClaim).isNotNull();
         assertThat(requireNonNull(matchingClaim).getAllocatedObject().get()).isEqualTo(2);
@@ -303,16 +310,16 @@ public class TestApi {
 
     @Test
     public void testClaimMatchingDoesNotAllocateNewObjects() throws InterruptedException {
-        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(
+        GenericObjectPool<AtomicReference<Integer>> pool = resources.pool(
                 PoolConfig.<AtomicReference<Integer>>builder().maxPoolsize(2).build(),
                 new MyAllocator());
 
-        PoolableObject<AtomicReference<Integer>> matchingClaim = pool.claimMatching(new Predicate<PoolableObject<AtomicReference<Integer>>>() {
+        PoolableObject<AtomicReference<Integer>> matchingClaim = resources.remember(pool.claimMatching(new Predicate<PoolableObject<AtomicReference<Integer>>>() {
             @Override
             public boolean test(PoolableObject<AtomicReference<Integer>> poolableObject) {
                 return true;
             }
-        }, 25, TimeUnit.MILLISECONDS);
+        }, 25, TimeUnit.MILLISECONDS));
 
         assertThat(matchingClaim).isNull();
         assertThat(pool.getPoolMetrics().getCurrentlyAllocated()).isZero();
@@ -327,12 +334,12 @@ public class TestApi {
                 .corePoolsize(1)
                 .maxPoolsize(1)
                 .build();
-        GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
+        GenericObjectPool<AtomicReference<Integer>> pool = resources.pool(poolConfig, new MyAllocator());
         final AtomicLong matchedIdleAgeMs = new AtomicLong();
 
         assertTrue(waitAndCheck(pool, 100, 1));
 
-        PoolableObject<AtomicReference<Integer>> matchingClaim = pool.claimMatching(new Predicate<PoolableObject<AtomicReference<Integer>>>() {
+        PoolableObject<AtomicReference<Integer>> matchingClaim = resources.remember(pool.claimMatching(new Predicate<PoolableObject<AtomicReference<Integer>>>() {
             @Override
             public boolean test(PoolableObject<AtomicReference<Integer>> poolableObject) {
                 long idleAgeMs = poolableObject.idleAgeMs();
@@ -342,7 +349,7 @@ public class TestApi {
                 }
                 return false;
             }
-        }, 500, TimeUnit.MILLISECONDS);
+        }, 500, TimeUnit.MILLISECONDS));
 
         assertThat(matchingClaim).isNotNull();
         assertThat(matchedIdleAgeMs.get()).isGreaterThanOrEqualTo(50);
@@ -358,22 +365,22 @@ public class TestApi {
                 .corePoolsize(2)
                 .maxPoolsize(2)
                 .build();
-        final GenericObjectPool<AtomicReference<Integer>> pool = new GenericObjectPool<>(poolConfig, new MyAllocator());
-        ExecutorService es = Executors.newSingleThreadExecutor();
+        final GenericObjectPool<AtomicReference<Integer>> pool = resources.pool(poolConfig, new MyAllocator());
+        ExecutorService es = resources.singleWorker();
 
         assertTrue(waitAndCheck(pool, 100));
 
-        PoolableObject<AtomicReference<Integer>> maintenanceClaim = pool.claimMatching(new Predicate<PoolableObject<AtomicReference<Integer>>>() {
+        PoolableObject<AtomicReference<Integer>> maintenanceClaim = resources.remember(pool.claimMatching(new Predicate<PoolableObject<AtomicReference<Integer>>>() {
             @Override
             public boolean test(PoolableObject<AtomicReference<Integer>> poolableObject) {
                 return true;
             }
-        }, 100, TimeUnit.MILLISECONDS);
+        }, 100, TimeUnit.MILLISECONDS));
 
         Future<PoolableObject<AtomicReference<Integer>>> normalClaim = es.submit(new java.util.concurrent.Callable<PoolableObject<AtomicReference<Integer>>>() {
             @Override
             public PoolableObject<AtomicReference<Integer>> call() throws Exception {
-                return pool.claim(100, TimeUnit.MILLISECONDS);
+                return resources.remember(pool.claim(100, TimeUnit.MILLISECONDS));
             }
         });
 
@@ -412,5 +419,14 @@ public class TestApi {
             }
         })
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    private boolean isDeallocated(final PoolableObject<?> lease) {
+        try {
+            lease.getAllocatedObject();
+            return false;
+        } catch (final IllegalStateException expected) {
+            return true;
+        }
     }
 }
