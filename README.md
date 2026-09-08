@@ -25,7 +25,7 @@ Maven Dependency Setup
 <dependency>
 	<groupId>com.github.bbottema</groupId>
 	<artifactId>generic-object-pool</artifactId>
-	<version>2.4.3</version>
+	<version>2.5.0</version>
 </dependency>
 ```
 
@@ -34,12 +34,12 @@ For JPMS applications, the published JAR declares the stable automatic module na
 
 ## Release Notes
 
-2.4.3 (7 September 2026)
+2.5.0 (8 September 2026)
 
-- [#20](https://github.com/bbottema/generic-object-pool/issues/20): Wake already-blocked claimers when invalidation frees capacity or the core pool adds replacements. These callers no longer need another release to make progress.
-- Concurrent invalidation of the same object now schedules cleanup only once and preserves pool counts.
-- Shutdown no longer observes the gap between invalidation and queued cleanup as an empty pool.
-- The public API, Java 8 baseline and JPMS module name are unchanged.
+- [#22](https://github.com/bbottema/generic-object-pool/issues/22): Optionally cancel pending claims and give acquisition one total time budget with `ClaimOptions` and `ClaimControl`.
+- Allocators can cooperate through `AllocationContext`; slow preparation no longer holds the pool's bookkeeping lock. Allocation and reuse callbacks remain serialized.
+- `PoolableObject.getDisposalCompletion()` acknowledges actual cleanup, separately from scheduling invalidation.
+- Existing claim methods and allocator subclasses remain supported. Java 8 and the JPMS module name are unchanged.
 
 ## Usage
 
@@ -110,6 +110,57 @@ Invalidation wakes ordinary callers that are already waiting for capacity. With 
 caller can create a replacement; a configured core pool also replenishes itself. Final cleanup remains asynchronous
 and need not finish before a replacement can be used. Matching claims still only take available objects: they do not
 allocate replacements themselves.
+
+#### Optional cancellation and a total acquisition budget
+
+For example, a cancelled export job should stop waiting for another database connection. Create the control before
+starting its worker, then retain it in the job's stop handler:
+
+```java
+ClaimControl claimControl = new ClaimControl();
+ClaimOptions options = ClaimOptions.withTimeout(30, TimeUnit.SECONDS)
+    .withClaimControl(claimControl);
+
+// On the job's worker; still an ordinary blocking call.
+PoolableObject<Foo> resource = pool.claim(options);
+// null: budget expired. CancellationException: stop requested. InterruptedException: worker interrupted.
+if (resource != null) {
+    try {
+        resource.getAllocatedObject().doWork();
+    } finally {
+        resource.release();
+    }
+}
+
+// In the stop handler, potentially on another thread:
+claimControl.requestCancellation();
+```
+
+Creating a control does not cancel anything. A control is thread-safe and one-shot; options are immutable and reusable.
+Each call starts a new monotonic budget covering selection by an outer pool, lock waiting, availability and preparation.
+`claimMatching(predicate, options)` has the same contract but never allocates resources. Zero budget starts no preparation.
+The legacy timeout methods retain their existing wait semantics; they do not gain a total deadline implicitly.
+
+Cancellation ends at handoff: requesting it after `claim` returns does not revoke the borrowed resource. It does not
+interrupt an executor thread. Allocator callbacks run on the claiming thread (core replenishment remains pool-owned),
+and allocation/reuse/release preparation remains serialized per pool. Final deallocation runs on the cleanup worker.
+
+Override `allocate(AllocationContext)` or `allocateForReuse(resource, AllocationContext)` to cooperate: check
+`context.throwIfCancellationRequested()`, use `context.getRemainingTime(unit)` for your own I/O timeout, and optionally
+register a quick, non-blocking abort action with `context.onCancellation(...)`. An earlier request invokes that handler
+immediately. Handler runtime exceptions are logged and ignored. Close registrations when their resource is no longer
+owned; the pool also detaches them before handoff. An allocator must clean up anything it creates but never returns.
+
+An old allocator that blocks in `allocate()` remains supported, but cannot be forcibly stopped: cancellation is recorded
+promptly, then the claim waits for allocation to exit and disposes any late resource instead of handing it off. Required
+cleanup can also outlast the acquisition budget. New context-aware claims settle only after that cleanup finishes;
+cleanup failures are reported (or suppressed on the original failure), not treated as successful disposal. A preparation
+exception after cancellation was requested is retained as the cause of `CancellationException`.
+
+`invalidate()` still only schedules cleanup. If physical disposal matters, use
+`resource.getDisposalCompletion().toCompletableFuture().get()`. A healthy `release()` does not complete this stage;
+the resource is still reusable. Each returned stage is detached from the pool's internal signal. Keep non-async stage
+callbacks short because they can run on the cleanup worker.
 
 #### Shutting down a pool
 

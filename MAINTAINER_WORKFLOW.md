@@ -112,6 +112,18 @@ When public packaging or JPMS metadata changes, inspect the built JAR as well as
 
 If a build inserts generated license headers into the working tree, remove them with the configured license goal before staging and confirm that only intentional source changes remain.
 
+For acquisition API changes, also run the checked-in compatibility probe after packaging:
+
+```powershell
+./scripts/verify-compatibility.ps1 -Java8Home '<JDK 8>' -ModernJavaHome '<JDK 21>'
+```
+
+It compiles a legacy allocator/client against the published 2.4.3 JAR, runs those unchanged classes with the candidate,
+and checks the new API on Java 8/21 classpaths and the modern module path. Run the compiled test suite with
+`mvn surefire:test -Djacoco.skip=true -Dnet.bytebuddy.experimental=true` under JDK 21 as a separate runtime lane;
+the extra property lets the existing test-only Byte Buddy version instrument Java 21 classes. The release compilation
+remains Java 8, and the standalone compatibility probes do not depend on Mockito or Byte Buddy.
+
 ## 7. Documentation and release notes
 
 `RELEASE.txt` retains the complete release history. `README.md` is the developer landing page: keep its dependency example, current version, JPMS name, and current-release summary aligned without turning it into a second full archive.
