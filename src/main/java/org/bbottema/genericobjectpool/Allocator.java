@@ -15,6 +15,18 @@ public abstract class Allocator<T> {
 	 */
 	@NotNull
 	public abstract T allocate();
+
+	/**
+	 * Prepares a new resource for an opt-in claim. Override to observe cancellation and apply the remaining budget
+	 * to blocking work. This default preserves existing allocator implementations by delegating to {@link #allocate()}.
+	 * The allocator owns partially created resources if it throws before returning one to the pool.
+	 *
+	 * @since 2.5.0
+	 */
+	@NotNull
+	public T allocate(@NotNull final AllocationContext context) {
+		return allocate();
+	}
 	
 	/**
 	 * Uninitialize an instance which has been released back to the pool, until it is claimed again.
@@ -28,6 +40,17 @@ public abstract class Allocator<T> {
 	 */
 	public void allocateForReuse(T object) {
 		// overridable hook
+	}
+
+	/**
+	 * Prepares an existing resource for an opt-in claim, with cooperative cancellation and a remaining budget.
+	 * Delegates to {@link #allocateForReuse(Object)} for existing allocators. The pool disposes the resource if
+	 * preparation fails or the claim is cancelled before handoff.
+	 *
+	 * @since 2.5.0
+	 */
+	public void allocateForReuse(final T object, @NotNull final AllocationContext context) {
+		allocateForReuse(object);
 	}
 	
 	/**

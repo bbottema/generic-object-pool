@@ -4,6 +4,15 @@ https://github.com/bbottema/generic-object-pool
 RELEASE NOTES generic-object-pool
 
 
+v2.5.0 (8 September 2026)
+
+- #22: Add opt-in ClaimOptions and ClaimControl for cancellation of pending claims and a single total acquisition budget.
+- #22: Give allocators cooperative AllocationContext hooks while preserving existing allocator subclasses and serialized preparation callbacks.
+- #22: Run preparation outside pool bookkeeping, reserve capacity safely, and discard late resources when cancellation or timeout wins before handoff.
+- #22: Expose final disposal completion separately from asynchronous invalidation; cancellation never revokes a resource already handed to a borrower.
+- Existing claim methods, Java 8 baseline and JPMS automatic module name remain supported.
+
+
 v2.4.3 (7 September 2026)
 
 - #20: Wake blocked claimers when invalidation frees capacity and when background core-pool allocation publishes replacements, including partial allocation followed by failure.
