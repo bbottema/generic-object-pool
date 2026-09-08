@@ -8,6 +8,8 @@ import org.jetbrains.annotations.NotNull;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 import static lombok.AccessLevel.PACKAGE;
 import static org.bbottema.genericobjectpool.PoolableObject.PoolStatus.AVAILABLE;
@@ -22,7 +24,7 @@ import static org.bbottema.genericobjectpool.PoolableObject.PoolStatus.DEALLOCAT
 public class PoolableObject<T> {
 	
 	enum PoolStatus {
-		AVAILABLE, CLAIMED, WAITING_FOR_DEALLOCATION, DEALLOCATED
+		AVAILABLE, PREPARING, CLAIMED, RELEASING, WAITING_FOR_DEALLOCATION, DEALLOCATED
 	}
 
 	@ToString.Exclude
@@ -49,7 +51,9 @@ public class PoolableObject<T> {
 	 * Performance optimisation: this field keeps track of the list this poolable object is in, so we don't have to do {@code .contains(object)}
 	 * all the time.
 	 */
-	@NotNull @Getter(PACKAGE) @Setter(PACKAGE) private PoolStatus currentPoolStatus;
+	@NotNull @Getter(PACKAGE) @Setter(PACKAGE) private volatile PoolStatus currentPoolStatus;
+	@ToString.Exclude private final CompletableFuture<Void> disposalCompletion = new CompletableFuture<>();
+	@Getter(PACKAGE) @Setter(PACKAGE) private boolean invalidationRequested;
 	
 	PoolableObject(GenericObjectPool<T> pool, @NotNull T allocatedObject) {
 		this.pool = pool;
@@ -74,6 +78,26 @@ public class PoolableObject<T> {
 	 */
 	public void invalidate() {
 		pool.invalidatePoolableObject(this);
+	}
+
+	/**
+	 * Completes after final deallocation returns, exceptionally if it fails. This is not claim or borrower-work
+	 * completion: a healthy {@link #release()} deliberately keeps the physical resource available for reuse.
+	 * Each call returns a detached view that cannot complete or cancel the pool's own cleanup signal.
+	 * Non-async completion handlers may run on the cleanup worker; keep them non-blocking, or use an async handler.
+	 *
+	 * @since 2.5.0
+	 */
+	public CompletionStage<Void> getDisposalCompletion() {
+		return disposalCompletion.thenApply(ignored -> null);
+	}
+
+	void completeDisposal(final Throwable failure) {
+		if (failure == null) {
+			disposalCompletion.complete(null);
+		} else {
+			disposalCompletion.completeExceptionally(failure);
+		}
 	}
 	
 	void resetAllocationTimestamp() {

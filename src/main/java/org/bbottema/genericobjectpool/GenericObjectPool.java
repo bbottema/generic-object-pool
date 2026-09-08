@@ -8,19 +8,19 @@ import org.bbottema.genericobjectpool.util.Timeout;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedList;
-import java.util.List;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Predicate;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Predicate;
 
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.Executors.newSingleThreadExecutor;
@@ -30,480 +30,606 @@ import static org.bbottema.genericobjectpool.util.ForeverTimeout.WAIT_FOREVER;
 public class GenericObjectPool<T> {
 
 	private static final int DEALLOCATION_WAIT_MS = 100;
-	private static final int MATCHING_CLAIM_RECHECK_INTERVAL_MS = 10;
-	
+
 	@NotNull private final Lock claimLock = new ReentrantLock();
+	// Keep existing allocators serialized, without holding up cancellation, metrics or pool bookkeeping.
+	@NotNull private final Lock allocatorLock = new ReentrantLock();
 	@NotNull private final Lock deallocateLock = new ReentrantLock();
 	@NotNull private final LinkedList<PoolableObject<T>> available = new LinkedList<>();
 	@NotNull private final LinkedList<PoolableObject<T>> waitingForDeallocation = new LinkedList<>();
-	@NotNull private final LinkedList<Condition> objectAvailableConditions = new LinkedList<>();
+	@NotNull private final LinkedList<ClaimAttempt> waitingClaims = new LinkedList<>();
 	@NotNull private final Condition objectWaitingForDeallocation = deallocateLock.newCondition();
-	
+
 	@NotNull @Getter private final PoolConfig<T> poolConfig;
 	@NotNull @Getter private final Allocator<T> allocator;
-	
 	@Nullable private volatile Future<Void> shutdownSequence;
-	
-	@NotNull private final AtomicInteger currentlyClaimed = new AtomicInteger();
+
 	@NotNull private final AtomicInteger currentlyDeallocating = new AtomicInteger();
 	@NotNull private final AtomicLong totalAllocated = new AtomicLong();
 	@NotNull private final AtomicLong totalClaimed = new AtomicLong();
-	
+	// All four counts below are protected by claimLock. Reservations consume capacity before allocation starts.
+	private int currentlyAllocated;
+	private int currentlyClaimed;
+	private int pendingAllocations;
+	private int pendingClaims;
+
 	public GenericObjectPool(final PoolConfig<T> poolConfig, @NotNull final Allocator<T> allocator) {
-		this.poolConfig = poolConfig;
-		this.allocator = allocator;
+		this.poolConfig = requireNonNull(poolConfig, "poolConfig");
+		this.allocator = requireNonNull(allocator, "allocator");
 		poolConfig.getThreadFactory().newThread(new AutoAllocator()).start();
 		poolConfig.getThreadFactory().newThread(new AutoDeallocator()).start();
 	}
-	
-	/**
-	 * Delegates to {@link #claim(Timeout)} with unlimited timeout.
-	 */
+
+	/** Delegates to {@link #claim(Timeout)} with unlimited timeout. */
 	@NotNull
-	@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "False positive")
+	@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "Unlimited legacy claims do not time out")
 	public PoolableObject<T> claim() throws InterruptedException {
 		return requireNonNull(claim(WAIT_FOREVER));
 	}
-	
-	/**
-	 * Delegates to {@link #claim(Timeout)}.
-	 */
+
+	/** Delegates to {@link #claim(Timeout)}. */
 	@Nullable
 	public PoolableObject<T> claim(final long timeout, final TimeUnit timeUnit) throws InterruptedException {
 		return claim(new Timeout(timeout, timeUnit));
 	}
-	
+
 	/**
-	 * Will claim available object, create a new one if there is room to grow the pool, or else wait until either become true.
+	 * Claims an available object, creates one if there is room, or waits for either to become possible.
+	 * The legacy timeout limits each availability wait, not lock acquisition or allocator callbacks.
 	 *
-	 * @throws IllegalStateException if you try a new claim while the pool is shut down
-	 * @throws InterruptedException  if the pool was waiting and the pool shut down in the mean time
+	 * @throws IllegalStateException if a new claim is made after shutdown starts
+	 * @throws InterruptedException if a waiting claim is interrupted or the pool shuts down while it waits
 	 */
-	@SuppressWarnings("WeakerAccess")
 	@Nullable
-	public PoolableObject<T> claim(final Timeout timeout) throws InterruptedException, IllegalStateException {
-		claimLock.lock();
-		try {
-			return claimOrCreateOrWaitUntilAvailable(timeout);
-		} finally {
-			claimLock.unlock();
-		}
+	public PoolableObject<T> claim(final Timeout timeout) throws InterruptedException {
+		return claimResource(new ClaimAttempt(requireNonNull(timeout, "timeout"), null, false), null);
 	}
 
 	/**
-	 * Delegates to {@link #claimMatching(Predicate, Timeout)}.
+	 * Claims using one total acquisition budget and optional cancellation control. Preparation stays on the caller's
+	 * thread. Returns null on timeout and throws {@link java.util.concurrent.CancellationException} on cancellation.
+	 * A non-cooperative allocator or required disposal may delay settlement, but cannot cause a cancelled resource
+	 * to be handed off. After successful return, acquisition cancellation no longer affects the borrowed object.
+	 *
+	 * @since 2.5.0
 	 */
 	@Nullable
-	public PoolableObject<T> claimMatching(@NotNull final Predicate<PoolableObject<T>> predicate, final long timeout, final TimeUnit timeUnit) throws InterruptedException {
+	public PoolableObject<T> claim(final ClaimOptions options) throws InterruptedException {
+		return claimWithContext(requireNonNull(options, "options").start());
+	}
+
+	/**
+	 * Integration entry point for a budget already started by an outer pool. Do not restart the context between layers
+	 * or reuse it for independent claims; ordinary callers should use {@link #claim(ClaimOptions)}.
+	 *
+	 * @since 2.5.0
+	 */
+	@Nullable
+	public PoolableObject<T> claimWithContext(final AllocationContext context) throws InterruptedException {
+		return claimResource(new ClaimAttempt(null, requireNonNull(context, "context"), false), null);
+	}
+
+	/** Delegates to {@link #claimMatching(Predicate, Timeout)}. */
+	@Nullable
+	public PoolableObject<T> claimMatching(@NotNull final Predicate<PoolableObject<T>> predicate,
+			final long timeout, final TimeUnit timeUnit) throws InterruptedException {
 		return claimMatching(predicate, new Timeout(timeout, timeUnit));
 	}
 
 	/**
-	 * Claims an already available object matching the predicate, or waits until one becomes available or matches due to time passing.
-	 * <p>
-	 * This method does not allocate new objects. Keep the predicate fast and side-effect free; it is evaluated while the pool claim lock is held.
+	 * Claims an already available matching object, without allocating a new one. The predicate is rechecked as time
+	 * passes; keep it fast and side-effect free because it runs under the bookkeeping lock.
 	 */
-	@SuppressWarnings("WeakerAccess")
 	@Nullable
-	public PoolableObject<T> claimMatching(@NotNull final Predicate<PoolableObject<T>> predicate, final Timeout timeout) throws InterruptedException, IllegalStateException {
+	public PoolableObject<T> claimMatching(@NotNull final Predicate<PoolableObject<T>> predicate, final Timeout timeout)
+			throws InterruptedException {
 		requireNonNull(predicate, "predicate");
+		return claimResource(new ClaimAttempt(requireNonNull(timeout, "timeout"), null, true), predicate);
+	}
+
+	/**
+	 * Matching-only counterpart of {@link #claim(ClaimOptions)}, with the same cancellation and cleanup contract.
+	 * Never creates a new resource.
+	 *
+	 * @since 2.5.0
+	 */
+	@Nullable
+	public PoolableObject<T> claimMatching(@NotNull final Predicate<PoolableObject<T>> predicate, final ClaimOptions options)
+			throws InterruptedException {
+		return claimMatchingWithContext(predicate, requireNonNull(options, "options").start());
+	}
+
+	/** Integration counterpart of {@link #claimMatching(Predicate, ClaimOptions)} that preserves an outer budget. */
+	@Nullable
+	public PoolableObject<T> claimMatchingWithContext(@NotNull final Predicate<PoolableObject<T>> predicate,
+			final AllocationContext context) throws InterruptedException {
+		requireNonNull(predicate, "predicate");
+		return claimResource(new ClaimAttempt(null, requireNonNull(context, "context"), true), predicate);
+	}
+
+	@Nullable
+	private PoolableObject<T> claimResource(final ClaimAttempt attempt, final Predicate<PoolableObject<T>> predicate)
+			throws InterruptedException {
+		try (ClaimAttempt ignored = attempt) {
+			while (attempt.acquire(claimLock)) {
+				final Reservation reservation;
+				try {
+					ensureOpenFor(attempt);
+					reservation = reserveResource(predicate);
+					if (reservation == null) {
+						attempt.prepareToWait();
+						waitingClaims.add(attempt);
+					}
+				} finally {
+					claimLock.unlock();
+				}
+				if (reservation != null) {
+					return prepareAndHandOff(reservation, attempt);
+				}
+				if (!waitForAvailability(attempt)) {
+					return null;
+				}
+			}
+			return null;
+		}
+	}
+
+	private void ensureOpenFor(final ClaimAttempt attempt) throws InterruptedException {
+		if (isShuttingDown()) {
+			if (attempt.hasWaited()) {
+				throw new InterruptedException("Pool is shutting down");
+			}
+			throw new IllegalStateException("Pool has been shutdown");
+		}
+	}
+
+	private Reservation reserveResource(final Predicate<PoolableObject<T>> predicate) {
+		for (Iterator<PoolableObject<T>> iterator = available.iterator(); iterator.hasNext(); ) {
+			final PoolableObject<T> entry = iterator.next();
+			if (predicate == null || predicate.test(entry)) {
+				iterator.remove();
+				entry.setCurrentPoolStatus(PoolableObject.PoolStatus.PREPARING);
+				pendingClaims++;
+				return new Reservation(entry);
+			}
+		}
+		return predicate == null && currentlyAllocated + pendingAllocations < poolConfig.getMaxPoolsize()
+				? reserveAllocation() : null;
+	}
+
+	private Reservation reserveAllocation() {
+		pendingAllocations++;
+		pendingClaims++;
+		return new Reservation(null);
+	}
+
+	private boolean waitForAvailability(final ClaimAttempt attempt) throws InterruptedException {
+		try {
+			final boolean signalled = attempt.awaitAvailability();
+			ensureOpenFor(attempt);
+			return signalled;
+		} finally {
+			claimLock.lock();
+			try {
+				waitingClaims.remove(attempt);
+			} finally {
+				claimLock.unlock();
+			}
+		}
+	}
+
+	private PoolableObject<T> prepareAndHandOff(final Reservation reservation, final ClaimAttempt attempt)
+			throws InterruptedException {
+		PoolableObject<T> prepared = reservation.existing;
+		Throwable failure = null;
+		try {
+			prepared = prepareResource(reservation, attempt);
+			// Detach outside bookkeeping: a cooperative handler might still be finishing its short abort action.
+			attempt.close();
+			if (prepared != null && handOff(reservation, prepared, attempt)) {
+				return prepared;
+			}
+			attempt.canContinue();
+		} catch (RuntimeException | Error | InterruptedException preparationFailure) {
+			failure = attempt.preparationFailure(preparationFailure);
+		} finally {
+			attempt.close();
+		}
+		failure = disposeFailedReservation(reservation, prepared, attempt, failure);
+		rethrowFailure(failure);
+		attempt.canContinue();
+		return null;
+	}
+
+	private PoolableObject<T> prepareResource(final Reservation reservation, final ClaimAttempt attempt) throws InterruptedException {
+		if (!attempt.acquire(allocatorLock)) {
+			return reservation.existing;
+		}
+		try {
+			if (!attempt.canContinue()) {
+				return reservation.existing;
+			}
+			if (reservation.existing == null) {
+				final T resource = attempt.isControlled() ? allocator.allocate(attempt.getContext()) : allocator.allocate();
+				return new PoolableObject<>(this, requireNonNull(resource, "Allocated resource"));
+			}
+			if (attempt.isControlled()) {
+				allocator.allocateForReuse(reservation.existing.getAllocatedObject(), attempt.getContext());
+			} else {
+				allocator.allocateForReuse(reservation.existing.getAllocatedObject());
+			}
+			return reservation.existing;
+		} finally {
+			allocatorLock.unlock();
+		}
+	}
+
+	private boolean handOff(final Reservation reservation, final PoolableObject<T> prepared, final ClaimAttempt attempt)
+			throws InterruptedException {
 		claimLock.lock();
 		try {
-			return claimMatchingOrWaitUntilAvailable(predicate, timeout);
+			ensureOpenFor(attempt);
+			if (prepared.isInvalidationRequested()) {
+				throw new IllegalStateException("Resource invalidated during preparation");
+			}
+			return attempt.handOff(() -> {
+				finishReservation(reservation, prepared);
+				prepared.resetAllocationTimestamp();
+				prepared.setCurrentPoolStatus(PoolableObject.PoolStatus.CLAIMED);
+				currentlyClaimed++;
+				totalClaimed.incrementAndGet();
+			});
 		} finally {
 			claimLock.unlock();
+		}
+	}
+
+	private Throwable disposeFailedReservation(final Reservation reservation, final PoolableObject<T> prepared,
+			final ClaimAttempt attempt, final Throwable failure) {
+		claimLock.lock();
+		try {
+			finishReservation(reservation, prepared);
+			if (prepared != null) {
+				queueInvalidated(prepared);
+			}
+			signalAllWaitingClaimers();
+		} finally {
+			claimLock.unlock();
+		}
+		if (prepared != null && attempt.isControlled()) {
+			try {
+				// Cleanup must settle even when interrupted. join preserves the interrupt flag.
+				prepared.getDisposalCompletion().toCompletableFuture().join();
+			} catch (CompletionException cleanupFailure) {
+				if (failure == null) {
+					return cleanupFailure.getCause();
+				}
+				if (failure != cleanupFailure.getCause()) {
+					failure.addSuppressed(cleanupFailure.getCause());
+				}
+			}
+		}
+		return failure;
+	}
+
+	private void finishReservation(final Reservation reservation, final PoolableObject<T> prepared) {
+		pendingClaims--;
+		if (reservation.existing == null) {
+			pendingAllocations--;
+			if (prepared != null) {
+				currentlyAllocated++;
+				totalAllocated.incrementAndGet();
+			}
+		}
+	}
+
+	private static void rethrowFailure(final Throwable failure) throws InterruptedException {
+		if (failure instanceof InterruptedException) {
+			throw (InterruptedException) failure;
+		}
+		if (failure instanceof RuntimeException) {
+			throw (RuntimeException) failure;
+		}
+		if (failure instanceof Error) {
+			throw (Error) failure;
 		}
 	}
 
 	void releasePoolableObject(final PoolableObject<T> claimedObject) {
+		if (!beginRelease(claimedObject)) {
+			return;
+		}
+		Throwable failure = null;
+		allocatorLock.lock();
+		try {
+			allocator.deallocateForReuse(claimedObject.getAllocatedObject());
+		} catch (RuntimeException | Error releaseFailure) {
+			failure = releaseFailure;
+		} finally {
+			allocatorLock.unlock();
+			finishRelease(claimedObject, failure);
+		}
+		if (failure instanceof RuntimeException) {
+			throw (RuntimeException) failure;
+		}
+		if (failure instanceof Error) {
+			throw (Error) failure;
+		}
+	}
+
+	private boolean beginRelease(final PoolableObject<T> entry) {
 		claimLock.lock();
 		try {
-			if (isShuttingDown()) {
-				invalidatePoolableObject(claimedObject);
-			} else if (claimedObject.getCurrentPoolStatus() == PoolableObject.PoolStatus.CLAIMED) {
-				allocator.deallocateForReuse(claimedObject.getAllocatedObject());
-				currentlyClaimed.decrementAndGet();
-				claimedObject.resetAvailableTimestamp();
-				claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.AVAILABLE);
-				available.addLast(claimedObject);
-
-				signalAllWaitingClaimers();
+			if (entry.getCurrentPoolStatus() != PoolableObject.PoolStatus.CLAIMED) {
+				return false;
 			}
+			currentlyClaimed--;
+			if (isShuttingDown()) {
+				queueInvalidated(entry);
+				return false;
+			}
+			entry.setCurrentPoolStatus(PoolableObject.PoolStatus.RELEASING);
+			return true;
 		} finally {
 			claimLock.unlock();
 		}
 	}
 
-	void invalidatePoolableObject(final PoolableObject<T> claimedObject) {
+	private void finishRelease(final PoolableObject<T> entry, final Throwable failure) {
 		claimLock.lock();
 		try {
-			if (claimedObject.getCurrentPoolStatus() == PoolableObject.PoolStatus.CLAIMED) {
-				currentlyClaimed.decrementAndGet();
-			} else if (claimedObject.getCurrentPoolStatus() == PoolableObject.PoolStatus.AVAILABLE) {
-				available.remove(claimedObject);
+			if (failure != null || isShuttingDown() || entry.isInvalidationRequested()) {
+				queueInvalidated(entry);
 			} else {
-				return;
+				entry.resetAvailableTimestamp();
+				entry.setCurrentPoolStatus(PoolableObject.PoolStatus.AVAILABLE);
+				available.addLast(entry);
 			}
-			// Publish invalidation before another release/invalidation can observe the old state.
-			addObjectForDeallocation(claimedObject);
-			// Waiting ordinary claims can now allocate a replacement, including in a lazy pool.
 			signalAllWaitingClaimers();
 		} finally {
 			claimLock.unlock();
 		}
 	}
 
-	private void addObjectForDeallocation(final PoolableObject<T> claimedObject) {
+	void invalidatePoolableObject(final PoolableObject<T> entry) {
+		claimLock.lock();
+		try {
+			switch (entry.getCurrentPoolStatus()) {
+				case PREPARING:
+				case RELEASING:
+					entry.setInvalidationRequested(true);
+					return;
+				case CLAIMED:
+					currentlyClaimed--;
+					break;
+				case AVAILABLE:
+					available.remove(entry);
+					break;
+				default:
+					return;
+			}
+			queueInvalidated(entry);
+		} finally {
+			claimLock.unlock();
+		}
+	}
+
+	/** Caller holds claimLock; publishing capacity and the disposal queue is one atomic transition. */
+	private void queueInvalidated(final PoolableObject<T> entry) {
 		deallocateLock.lock();
 		try {
-			waitingForDeallocation.add(claimedObject);
-			claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.WAITING_FOR_DEALLOCATION);
+			currentlyAllocated--;
+			entry.setCurrentPoolStatus(PoolableObject.PoolStatus.WAITING_FOR_DEALLOCATION);
+			waitingForDeallocation.addLast(entry);
 			objectWaitingForDeallocation.signal();
 		} finally {
 			deallocateLock.unlock();
 		}
-	}
-
-	private PoolableObject<T> getObjectForDeallocation() {
-		PoolableObject<T> poolableObject = null;
-		deallocateLock.lock();
-		try {
-			if (!waitingForDeallocation.isEmpty()) {
-				currentlyDeallocating.incrementAndGet();
-				poolableObject = waitingForDeallocation.remove();
-			}
-		} finally {
-			deallocateLock.unlock();
-		}
-		return poolableObject;
-	}
-
-	@Nullable
-	private PoolableObject<T> waitForObjectForDeallocation() {
-		PoolableObject<T> poolableObject = null;
-		deallocateLock.lock();
-		try {
-			if (waitingForDeallocation.isEmpty() && !isShuttingDown()) {
-				final boolean deallocationAvailable = objectWaitingForDeallocation.await(DEALLOCATION_WAIT_MS, TimeUnit.MILLISECONDS);
-				if (!deallocationAvailable && waitingForDeallocation.isEmpty()) {
-					return null;
-				}
-			}
-			if (!waitingForDeallocation.isEmpty()) {
-				currentlyDeallocating.incrementAndGet();
-				poolableObject = waitingForDeallocation.remove();
-			}
-		} catch (InterruptedException e) {
-			Thread.currentThread().interrupt();
-		} finally {
-			deallocateLock.unlock();
-		}
-		return poolableObject;
-	}
-	
-	@Nullable
-	private PoolableObject<T> claimOrCreateOrWaitUntilAvailable(final Timeout timeout) throws InterruptedException, IllegalStateException {
-		PoolableObject<T> entry;
-		/*
-		 *	Try to claim an object or else wait for one to become available and then try again
-		 *	in between one becoming available and trying to claim again, it might have been
-		 *	snatched away by another thread.
-		 */
-		do {
-			if (isShuttingDown()) {
-				throw new IllegalStateException("Pool has been shutdown");
-			}
-			entry = claimOrCreateNewObjectIfSpaceLeft();
-		} while (entry == null && waitForAvailableObjectOrTimeout(timeout));
-		return entry;
-	}
-
-	@Nullable
-	private PoolableObject<T> claimMatchingOrWaitUntilAvailable(final Predicate<PoolableObject<T>> predicate, final Timeout timeout) throws InterruptedException, IllegalStateException {
-		final long deadlineMs = calculateDeadlineMs(timeout);
-		PoolableObject<T> entry;
-		do {
-			if (isShuttingDown()) {
-				throw new IllegalStateException("Pool has been shutdown");
-			}
-			entry = claimAvailableObjectMatching(predicate);
-		} while (entry == null && waitForMatchingObjectOrTimeout(deadlineMs));
-		return entry;
-	}
-	
-	@Nullable
-	private PoolableObject<T> claimOrCreateNewObjectIfSpaceLeft() {
-		PoolableObject<T> claimedObject = !available.isEmpty() ? available.removeFirst() : null;
-		if (claimedObject != null) {
-			prepareClaimedObjectForReuse(claimedObject);
-		} else if (getCurrentlyAllocated() < poolConfig.getMaxPoolsize()) {
-			claimedObject = new PoolableObject<>(this, allocator.allocate());
-			claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.CLAIMED);
-			currentlyClaimed.incrementAndGet();
-			totalAllocated.incrementAndGet();
-			totalClaimed.incrementAndGet();
-		}
-		return claimedObject;
-	}
-
-	@Nullable
-	private PoolableObject<T> claimAvailableObjectMatching(final Predicate<PoolableObject<T>> predicate) {
-		for (Iterator<PoolableObject<T>> iterator = available.iterator(); iterator.hasNext(); ) {
-			final PoolableObject<T> poolableObject = iterator.next();
-			if (predicate.test(poolableObject)) {
-				iterator.remove();
-				prepareClaimedObjectForReuse(poolableObject);
-				return poolableObject;
-			}
-		}
-		return null;
-	}
-
-	private void prepareClaimedObjectForReuse(final PoolableObject<T> claimedObject) {
-		allocator.allocateForReuse(claimedObject.getAllocatedObject());
-		claimedObject.resetAllocationTimestamp();
-		claimedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.CLAIMED);
-		currentlyClaimed.incrementAndGet();
-		totalClaimed.incrementAndGet();
-	}
-	
-	/**
-	 * Adds the current PoolWaitHelper into the waiting list.  The waitingClaimer will wait up until the specified deadline.  If the waitingClaimer is woken up before the specified deadline then true is returned
-	 * otherwise false.  The waitingClaimer will always be removed from the wait list regardless of the outcome.
-	 *
-	 * @param timeout the max timeout to wait for
-	 *
-	 * @return true if object became available
-	 * @throws InterruptedException the interrupted exception
-	 */
-	private boolean waitForAvailableObjectOrTimeout(final Timeout timeout) throws InterruptedException {
-		return waitForAvailableObjectOrTimeout(timeout.getDuration(), timeout.getTimeUnit());
-	}
-
-	private boolean waitForAvailableObjectOrTimeout(final long timeout, final TimeUnit timeUnit) throws InterruptedException {
-		final Condition objectAvailability = claimLock.newCondition();
-		try {
-			objectAvailableConditions.add(objectAvailability);
-			final boolean await = objectAvailability.await(timeout, timeUnit);
-			if (isShuttingDown()) {
-				throw new InterruptedException("Pool is shutting down");
-			}
-			return await;
-		} finally {
-			objectAvailableConditions.remove(objectAvailability);
-		}
-	}
-
-	private boolean waitForMatchingObjectOrTimeout(final long deadlineMs) throws InterruptedException {
-		final long remainingMs = deadlineMs - System.currentTimeMillis();
-		if (remainingMs <= 0) {
-			return false;
-		}
-		final long waitMs = Math.min(remainingMs, MATCHING_CLAIM_RECHECK_INTERVAL_MS);
-		return waitForAvailableObjectOrTimeout(waitMs, TimeUnit.MILLISECONDS) || System.currentTimeMillis() < deadlineMs;
-	}
-
-	private long calculateDeadlineMs(final Timeout timeout) {
-		final long now = System.currentTimeMillis();
-		final long durationMs = timeout.getDurationMs();
-		return durationMs >= Long.MAX_VALUE - now ? Long.MAX_VALUE : now + durationMs;
+		signalAllWaitingClaimers();
 	}
 
 	/**
-	 * Shuts down the current Pool stopping new allocations and triggering deallocations on all other available objects. Waits for
-	 * claimed objects to become available.
+	 * Stops new allocations and disposes available objects. Completes after borrowers return their objects,
+	 * outstanding preparation exits and final cleanup finishes.
 	 */
 	public synchronized Future<Void> shutdown() {
 		if (!isShuttingDown()) {
-			ExecutorService executorService = newSingleThreadExecutor(poolConfig.getThreadFactory());
-			shutdownSequence = executorService.submit(new ShutdownSequence(), null);
-			executorService.shutdown();
+			final FutureTask<Void> sequence = new FutureTask<>(new ShutdownSequence(), null);
+			shutdownSequence = sequence;
+			final ExecutorService executor = newSingleThreadExecutor(poolConfig.getThreadFactory());
+			executor.execute(sequence);
+			executor.shutdown();
 		}
 		return shutdownSequence;
 	}
-	
+
 	private boolean isShuttingDown() {
 		return shutdownSequence != null;
 	}
 
-	/**
-	 * Gets the allocation size.
-	 *
-	 * @return the allocation size
-	 */
-	@SuppressWarnings("WeakerAccess")
+	/** Gets the live allocation size, including preparation but excluding reservations and queued disposal. */
 	public int getCurrentlyAllocated() {
-		return available.size() + currentlyClaimed.get();
+		claimLock.lock();
+		try {
+			return currentlyAllocated;
+		} finally {
+			claimLock.unlock();
+		}
 	}
 
-	/**
-	 * @see PoolMetrics
-	 */
+	/** @see PoolMetrics */
 	@NotNull
 	public PoolMetrics getPoolMetrics() {
 		claimLock.lock();
 		try {
-			return new PoolMetrics(
-					currentlyClaimed.get(),
-					objectAvailableConditions.size(),
-					getCurrentlyAllocated(),
-					poolConfig.getCorePoolsize(),
-					poolConfig.getMaxPoolsize(),
-					totalAllocated.get(),
-					totalClaimed.get());
+			return new PoolMetrics(currentlyClaimed, waitingClaims.size(), currentlyAllocated, poolConfig.getCorePoolsize(),
+					poolConfig.getMaxPoolsize(), totalAllocated.get(), totalClaimed.get());
 		} finally {
 			claimLock.unlock();
 		}
 	}
 
-	private void deallocate(final PoolableObject<T> invalidatedObject) {
+	private PoolableObject<T> takeForDisposal(final boolean wait) {
+		deallocateLock.lock();
 		try {
-			allocator.deallocate(invalidatedObject.getAllocatedObject());
-		} catch (Exception e) {
-			log.error("error deallocating object already removed from the pool, ignoring it from now on...", e);
+			if (wait && waitingForDeallocation.isEmpty() && !isShuttingDown()) {
+				final boolean signalled = objectWaitingForDeallocation.await(DEALLOCATION_WAIT_MS, TimeUnit.MILLISECONDS);
+				if (!signalled && waitingForDeallocation.isEmpty()) {
+					return null;
+				}
+			}
+			if (waitingForDeallocation.isEmpty()) {
+				return null;
+			}
+			currentlyDeallocating.incrementAndGet();
+			return waitingForDeallocation.removeFirst();
+		} catch (InterruptedException interrupted) {
+			Thread.currentThread().interrupt();
+			return null;
+		} finally {
+			deallocateLock.unlock();
 		}
-		invalidatedObject.setCurrentPoolStatus(PoolableObject.PoolStatus.DEALLOCATED);
-		invalidatedObject.dereferenceObject();
+	}
+
+	private void disposeResource(final PoolableObject<T> entry) {
+		Throwable failure = null;
+		try {
+			allocator.deallocate(entry.getAllocatedObject());
+		} catch (RuntimeException | Error cleanupFailure) {
+			failure = cleanupFailure;
+			log.error("Error deallocating an object already removed from the pool", cleanupFailure);
+		} finally {
+			entry.dereferenceObject();
+			entry.setCurrentPoolStatus(PoolableObject.PoolStatus.DEALLOCATED);
+			entry.completeDisposal(failure);
+			currentlyDeallocating.decrementAndGet();
+		}
 	}
 
 	private void scheduleDeallocations() {
-		final ExpirationPolicy<T> expirationPolicy = poolConfig.getExpirationPolicy();
-		if (expirationPolicy == ExpirationPolicy.NeverExpirePolicy.getInstance()) {
-			return;
-		}
-		int objectsInvalidated = invalidateExpiredObjects(getExpiredObjects(expirationPolicy));
-        if (objectsInvalidated > 0) {
-			log.trace("{} objects invalidated as per expiration policy!", objectsInvalidated);
-        }
-	}
-
-	private int invalidateExpiredObjects(List<PoolableObject<T>> expiredObjects) {
-		int invalidatedObjects = 0;
 		claimLock.lock();
 		try {
-			for (final PoolableObject<T> poolableObject : expiredObjects) {
-				poolableObject.invalidate();
-				invalidatedObjects++;
-			}
-		} finally {
-			claimLock.unlock();
-		}
-		return invalidatedObjects;
-	}
-
-	private List<PoolableObject<T>> getExpiredObjects(ExpirationPolicy<T> expirationPolicy){
-		List<PoolableObject<T>> expiredObjects = new ArrayList<>();
-		claimLock.lock();
-		try {
-			for (final PoolableObject<T> poolableObject : available) {
-				if (expirationPolicy.hasExpired(poolableObject)) {
-					expiredObjects.add(poolableObject);
+			for (Iterator<PoolableObject<T>> iterator = available.iterator(); iterator.hasNext(); ) {
+				final PoolableObject<T> entry = iterator.next();
+				if (poolConfig.getExpirationPolicy().hasExpired(entry)) {
+					iterator.remove();
+					queueInvalidated(entry);
 				}
 			}
 		} finally {
 			claimLock.unlock();
 		}
-		return expiredObjects;
 	}
 
-	/**
-	 * <ol>
-	 *     <li>Automatically plan deallocation for expired objects</li>
-	 *     <li>Automatically deallocates one object every loop</li>
-	 * </ol>
-	 */
-	private class AutoDeallocator implements Runnable {
-
-		@Override
-		@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH", justification = "False positive")
-		public void run() {
-			//noinspection ConstantConditions
-			while (shutdownSequence == null || !shutdownSequence.isDone() || !waitingForDeallocation.isEmpty()) {
-				deallocateOneOrPlanDeallocations();
-			}
-			log.debug("AutoDeallocator finished");
+	private Reservation reserveCoreAllocation() {
+		claimLock.lock();
+		try {
+			return !isShuttingDown() && currentlyAllocated + pendingAllocations < poolConfig.getCorePoolsize()
+					? reserveAllocation() : null;
+		} finally {
+			claimLock.unlock();
 		}
+	}
 
-		private void deallocateOneOrPlanDeallocations() {
-			final boolean shouldScheduleDeallocations = poolConfig.getExpirationPolicy() != ExpirationPolicy.NeverExpirePolicy.getInstance();
-			PoolableObject<T> poolableObject = shouldScheduleDeallocations ? getObjectForDeallocation() : waitForObjectForDeallocation();
-			final boolean deallocatedAnObject = poolableObject != null;
-			if (poolableObject != null) {
-				try {
-					deallocate(poolableObject);
-				} finally {
-					currentlyDeallocating.decrementAndGet();
+	private void replenishCore(final Reservation reservation) {
+		PoolableObject<T> entry = null;
+		allocatorLock.lock();
+		try {
+			// Core replenishment belongs to the pool, not to whichever caller happened to arrive first.
+			if (!isShuttingDown()) {
+				entry = new PoolableObject<>(this, requireNonNull(allocator.allocate(), "Allocated resource"));
+			}
+		} catch (RuntimeException failure) {
+			log.error("Unable to replenish the core pool; will retry", failure);
+		} finally {
+			allocatorLock.unlock();
+			publishCoreAllocation(reservation, entry);
+		}
+	}
+
+	private void publishCoreAllocation(final Reservation reservation, final PoolableObject<T> entry) {
+		claimLock.lock();
+		try {
+			finishReservation(reservation, entry);
+			if (entry != null) {
+				if (isShuttingDown()) {
+					queueInvalidated(entry);
+				} else {
+					available.addLast(entry);
 				}
 			}
-			if (!deallocatedAnObject && shouldScheduleDeallocations) {
-				scheduleDeallocations();
-			}
-			SleepUtil.sleep(isShuttingDown() ? 0 : deallocatedAnObject ? 50 : shouldScheduleDeallocations ? 10 : 0);
+			signalAllWaitingClaimers();
+		} finally {
+			claimLock.unlock();
 		}
 	}
 
-	/**
-	 * <ol>
-	 * <li>Automatically allocates objects until core pool size is met. Initially fills up the pool and when object are
-	 * deallocated.</li>
-	 * </ol>
-	 */
-	private class AutoAllocator implements Runnable {
+	private boolean maintenanceNeeded() {
+		final Future<Void> sequence = shutdownSequence;
+		return sequence == null || !sequence.isDone();
+	}
 
+	private void signalAllWaitingClaimers() {
+		for (ClaimAttempt attempt : waitingClaims) {
+			attempt.signal();
+		}
+	}
+
+	private final class Reservation {
+		private final PoolableObject<T> existing;
+
+		private Reservation(final PoolableObject<T> existing) {
+			this.existing = existing;
+		}
+	}
+
+	/** Existing maintenance worker: expiration and final disposal, independent of allocator preparation. */
+	private final class AutoDeallocator implements Runnable {
 		@Override
-		@SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH", justification = "False positive")
 		public void run() {
-			//noinspection ConstantConditions
-			while (shutdownSequence == null || !shutdownSequence.isDone() || !waitingForDeallocation.isEmpty()) {
-				allocatedCorePool();
+			while (maintenanceNeeded()) {
+				final boolean expires = poolConfig.getExpirationPolicy() != ExpirationPolicy.NeverExpirePolicy.getInstance();
+				final PoolableObject<T> entry = takeForDisposal(!expires);
+				if (entry != null) {
+					disposeResource(entry);
+				} else if (expires) {
+					scheduleDeallocations();
+				}
+				SleepUtil.sleep(isShuttingDown() ? 0 : entry != null ? 50 : expires ? 10 : 0);
+			}
+		}
+	}
+
+	/** Existing maintenance worker: reserves capacity before running pool-owned core allocation outside bookkeeping. */
+	private final class AutoAllocator implements Runnable {
+		@Override
+		public void run() {
+			while (maintenanceNeeded()) {
+				final Reservation reservation = reserveCoreAllocation();
+				if (reservation != null) {
+					replenishCore(reservation);
+				}
 				SleepUtil.sleep(5);
 			}
-			log.debug("AutoAllocator finished");
-		}
-
-		private void allocatedCorePool() {
-			claimLock.lock();
-			boolean addedObject = false;
-			try {
-				while (getCurrentlyAllocated() < poolConfig.getCorePoolsize() && !isShuttingDown()) {
-					available.addLast(new PoolableObject<>(GenericObjectPool.this, allocator.allocate()));
-					totalAllocated.incrementAndGet();
-					addedObject = true;
-				}
-			} catch (Exception e) {
-				log.error("Not able to allocate new object! This might be a temporary issue due to external reasons (a server rejecting a connection for example).", e);
-			} finally {
-				// Earlier allocations remain usable even if a later allocation in this batch failed.
-				if (addedObject) {
-					signalAllWaitingClaimers();
-				}
-				claimLock.unlock();
-			}
 		}
 	}
-	
-	private class ShutdownSequence implements Runnable {
-		
+
+	private final class ShutdownSequence implements Runnable {
 		@Override
 		public void run() {
-			initiateShutdown();
-			waitUntilShutDown();
-			log.info("Simple Object Pool shutdown complete");
-		}
-		
-		private void initiateShutdown() {
 			claimLock.lock();
 			try {
 				while (!available.isEmpty()) {
-					available.remove().invalidate();
+					queueInvalidated(available.removeFirst());
 				}
 				signalAllWaitingClaimers();
 			} finally {
 				claimLock.unlock();
 			}
-			signalObjectWaitingForDeallocation();
+			waitUntilShutDown();
+			log.info("Generic Object Pool shutdown complete");
 		}
-		
+
 		private void waitUntilShutDown() {
 			while (hasOutstandingWork()) {
 				SleepUtil.sleep(10);
@@ -511,35 +637,18 @@ public class GenericObjectPool<T> {
 		}
 
 		private boolean hasOutstandingWork() {
-			// Observe the claim-to-queue and queue-to-cleanup hand-offs as one consistent snapshot.
-			// Always take these locks in the same order as invalidation.
 			claimLock.lock();
 			try {
 				deallocateLock.lock();
 				try {
-					return currentlyClaimed.get() > 0 || currentlyDeallocating.get() > 0
-							|| !objectAvailableConditions.isEmpty() || !available.isEmpty() || !waitingForDeallocation.isEmpty();
+					return currentlyAllocated > 0 || pendingClaims > 0 || currentlyDeallocating.get() > 0
+							|| !waitingClaims.isEmpty() || !waitingForDeallocation.isEmpty();
 				} finally {
 					deallocateLock.unlock();
 				}
 			} finally {
 				claimLock.unlock();
 			}
-		}
-	}
-
-	private void signalAllWaitingClaimers() {
-		for (Condition condition : objectAvailableConditions) {
-			condition.signal();
-		}
-	}
-
-	private void signalObjectWaitingForDeallocation() {
-		deallocateLock.lock();
-		try {
-			objectWaitingForDeallocation.signal();
-		} finally {
-			deallocateLock.unlock();
 		}
 	}
 }

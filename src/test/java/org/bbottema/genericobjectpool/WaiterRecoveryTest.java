@@ -240,7 +240,8 @@ class WaiterRecoveryTest {
 			awaitWaiters(pool, 1);
 			startMaintenance.countDown();
 			assertThat(result(first).getAllocatedObject()).isEqualTo(1);
-			assertThat(failures.get()).isPositive();
+			// Publishing each allocation no longer holds the claim lock across the following allocator callback.
+			await("a subsequent core allocation failed", () -> failures.get() > 0);
 			assertThat(pool.getPoolMetrics().getTotalAllocated()).isEqualTo(1);
 
 			final Future<PoolableObject<Integer>> second = resources.workers.submit(() -> resources.remember(
