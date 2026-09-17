@@ -1,6 +1,7 @@
 package org.bbottema.genericobjectpool.expirypolicies;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import lombok.EqualsAndHashCode;
 import org.bbottema.genericobjectpool.PoolableObject;
 import org.jetbrains.annotations.NotNull;
 
@@ -9,6 +10,7 @@ import java.util.concurrent.TimeUnit;
 import static java.util.Objects.requireNonNull;
 
 @SuppressWarnings("unused")
+@EqualsAndHashCode(callSuper = true)
 public class TimeoutSinceLastAllocationExpirationPolicy<T> extends TimeoutExpirationPolicy<T> {
 	public TimeoutSinceLastAllocationExpirationPolicy(long expiryAge, TimeUnit unit) {
 		super(expiryAge, unit);
