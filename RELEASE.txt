@@ -4,6 +4,13 @@ https://github.com/bbottema/generic-object-pool
 RELEASE NOTES generic-object-pool
 
 
+v2.5.1 (17 September 2026)
+
+- #24, #25: Distinguish creation-age and last-allocation timeout policies with identical thresholds or randomized bounds, preventing CombinedExpirationPolicies from silently dropping a rule and keeping each policy's expiry state separate.
+- Matching configurations of the same policy type retain value equality and consistent hash codes.
+- Java 8 baseline, existing APIs and JPMS automatic module name remain unchanged.
+
+
 v2.5.0 (8 September 2026)
 
 - #22: Add opt-in ClaimOptions and ClaimControl for cancellation of pending claims and a single total acquisition budget.

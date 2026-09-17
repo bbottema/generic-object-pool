@@ -25,7 +25,7 @@ Maven Dependency Setup
 <dependency>
 	<groupId>com.github.bbottema</groupId>
 	<artifactId>generic-object-pool</artifactId>
-	<version>2.5.0</version>
+	<version>2.5.1</version>
 </dependency>
 ```
 
@@ -34,12 +34,10 @@ For JPMS applications, the published JAR declares the stable automatic module na
 
 ## Release Notes
 
-2.5.0 (8 September 2026)
+2.5.1 (17 September 2026)
 
-- [#22](https://github.com/bbottema/generic-object-pool/issues/22): Optionally cancel pending claims and give acquisition one total time budget with `ClaimOptions` and `ClaimControl`.
-- Allocators can cooperate through `AllocationContext`; slow preparation no longer holds the pool's bookkeeping lock. Allocation and reuse callbacks remain serialized.
-- `PoolableObject.getDisposalCompletion()` acknowledges actual cleanup, separately from scheduling invalidation.
-- Existing claim methods and allocator subclasses remain supported. Java 8 and the JPMS module name are unchanged.
+- [#24](https://github.com/bbottema/generic-object-pool/issues/24), [#25](https://github.com/bbottema/generic-object-pool/pull/25): Keep creation-age and last-allocation timeout policies distinct when their thresholds or randomized bounds match, so combined policies retain both rules and each rule keeps its own expiry state.
+- Matching configurations of the same policy type remain equal. Java 8, existing APIs, and the JPMS module name are unchanged.
 
 ## Usage
 
@@ -262,6 +260,8 @@ You can also spread the expiry around in a bandwidth to avoid having everything 
 
 You can also combine multiple expirations, by passing instances of them as a set to:
 * `CombinedExpirationPolicies`
+
+Since 2.5.1, creation-age and last-allocation policies remain distinct even when their timeout values or randomized bounds match. Matching configurations of the same policy type still represent one rule.
 
 Finally, you can extend any of these or create your own from scratch by implementing:
 * `ExpirationPolicy`
