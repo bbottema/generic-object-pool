@@ -522,6 +522,10 @@ public class GenericObjectPool<T> {
 	}
 
 	private Reservation reserveCoreAllocation() {
+		// A declined maintenance attempt must not occupy capacity needed by an explicit claim.
+		if (!backgroundAllocationAllowed()) {
+			return null;
+		}
 		claimLock.lock();
 		try {
 			return !isShuttingDown() && currentlyAllocated + pendingAllocations < poolConfig.getCorePoolsize()
@@ -536,7 +540,7 @@ public class GenericObjectPool<T> {
 		allocatorLock.lock();
 		try {
 			// Core replenishment belongs to the pool, not to whichever caller happened to arrive first.
-			if (!isShuttingDown()) {
+			if (!isShuttingDown() && backgroundAllocationAllowed()) {
 				entry = new PoolableObject<>(this, requireNonNull(allocator.allocate(), "Allocated resource"));
 			}
 		} catch (RuntimeException failure) {
@@ -544,6 +548,19 @@ public class GenericObjectPool<T> {
 		} finally {
 			allocatorLock.unlock();
 			publishCoreAllocation(reservation, entry);
+		}
+	}
+
+	private boolean backgroundAllocationAllowed() {
+		if (isShuttingDown()) {
+			return false;
+		}
+		try {
+			return allocator.isBackgroundAllocationAllowed();
+		} catch (RuntimeException failure) {
+			// A broken integration hook must not terminate the maintenance worker or leak a reservation.
+			log.error("Unable to check permission for background allocation; deferring replenishment", failure);
+			return false;
 		}
 	}
 

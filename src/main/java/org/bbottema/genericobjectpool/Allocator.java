@@ -3,12 +3,34 @@ package org.bbottema.genericobjectpool;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * A factory which is responsible for creating the Object V based on the Pool Key.  The returned Object will be wrapped in a {@link PoolableObject} and inserted into the Pool for access
+ * Creates the resources your pool lends to callers and provides hooks for preparing, reusing and disposing them.
+ * The pool wraps each returned resource in a {@link PoolableObject} to manage borrowing and release.
  *
  * @param <T> the value type
  */
 @SuppressWarnings("unused")
 public abstract class Allocator<T> {
+
+	/**
+	 * Lets you pause the pool's automatic top-up without stopping callers from borrowing resources.
+	 * For example, an application can stop creating spare service connections while that service is unavailable,
+	 * then allow them again when its own recovery logic decides to resume.
+	 * <p>
+	 * Returning {@code false} postpones creation of resources needed to maintain the configured core pool size.
+	 * It does not report an allocation failure or keep capacity reserved. Existing resources remain usable;
+	 * explicit claims can still create resources when needed. Expiration and disposal continue normally.
+	 * <p>
+	 * Keep this method fast and thread-safe. The maintenance worker polls it outside pool bookkeeping locks and
+	 * checks again immediately before allocation. An allocation already in progress may still complete after
+	 * permission changes. The pool does not schedule recovery attempts or decide when to resume; the default
+	 * returns {@code true}, preserving automatic top-up for existing allocators.
+	 *
+	 * @return whether the maintenance worker may create another resource
+	 * @since 2.6.0
+	 */
+	public boolean isBackgroundAllocationAllowed() {
+		return true;
+	}
 	
 	/**
 	 * @return A new Object to be inserted into the Pool.

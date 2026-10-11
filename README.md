@@ -34,6 +34,11 @@ For JPMS applications, the published JAR declares the stable automatic module na
 
 ## Release Notes
 
+2.6.0 (unreleased)
+
+- [#26](https://github.com/bbottema/generic-object-pool/issues/26): Pause automatic pool top-up with `Allocator.isBackgroundAllocationAllowed()`, for example while your application handles a service outage. Existing allocators keep automatic top-up enabled; ordinary claims, existing resources and expiration are unchanged.
+- Returning `false` postpones spare-resource creation without an allocation error or reserved capacity. Your application decides when to allow it again; the pool does not add retries or health checks. See [Pausing automatic top-up](#pausing-automatic-top-up) for an example.
+
 2.5.1 (17 September 2026)
 
 - [#24](https://github.com/bbottema/generic-object-pool/issues/24), [#25](https://github.com/bbottema/generic-object-pool/pull/25): Keep creation-age and last-allocation timeout policies distinct when their thresholds or randomized bounds match, so combined policies retain both rules and each rule keeps its own expiry state.
@@ -63,6 +68,44 @@ PoolConfig<Foo> poolConfig = PoolConfig.<AtomicReference<Integer>>builder()
 
 GenericObjectPool<Foo> pool = new GenericObjectPool<>(poolConfig, new MyFooAllocator());
 ````
+
+#### Pausing automatic top-up
+
+The pool normally creates spare resources in the background to maintain `corePoolsize`. You can pause that work without
+stopping callers from borrowing resources. For example, your application might avoid opening spare service connections
+while it handles an outage, then permit them again after recovery.
+
+Override `Allocator.isBackgroundAllocationAllowed()` and return your application's current decision. Here, `MyFooAllocator`
+is the application's allocator from the pool examples above, and `AtomicBoolean` makes the flag safe across threads:
+
+```java
+AtomicBoolean automaticTopUp = new AtomicBoolean(true);
+Allocator<Foo> allocator = new MyFooAllocator() {
+    @Override
+    public boolean isBackgroundAllocationAllowed() {
+        return automaticTopUp.get();
+    }
+};
+
+PoolConfig<Foo> config = PoolConfig.<Foo>builder()
+    .corePoolsize(2)
+    .maxPoolsize(10)
+    .build();
+GenericObjectPool<Foo> pool = new GenericObjectPool<>(config, allocator);
+
+automaticTopUp.set(false); // Application decides not to create spare resources right now.
+// Normal claim/release calls still work, including allocation needed by an explicit claim.
+automaticTopUp.set(true);  // The maintenance worker can top up again on a later pass.
+```
+
+The numbers are example pool sizes, not limits supplied by the library. With no core pool size configured, there is no
+automatic top-up to pause. Returning `false` is not an allocation error and keeps no pool capacity reserved. Existing
+resources, expiration and disposal continue normally; an allocation already underway may still finish.
+
+Keep the check quick and thread-safe: the maintenance worker polls it outside pool bookkeeping locks and checks again
+immediately before creating a resource. A runtime exception in the check is logged and postpones top-up. This is not a
+circuit breaker for explicit claims, and it does not schedule retries or detect service recovery for you. Existing allocators
+need no changes: the default returns `true`. This API is part of the unreleased 2.6.0 work described above.
 
 #### Claim / release API
 
