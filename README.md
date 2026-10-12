@@ -1,6 +1,6 @@
 [![APACHE v2 License](https://img.shields.io/badge/license-apachev2-blue.svg?style=flat)](LICENSE-2.0.txt) 
 [![Latest Release](https://img.shields.io/maven-central/v/com.github.bbottema/generic-object-pool.svg?style=flat)](http://search.maven.org/#search%7Cgav%7C1%7Cg%3A%22com.github.bbottema%22%20AND%20a%3A%22generic-object-pool%22)
-[![Javadocs](https://img.shields.io/badge/javadoc-2.0.0-brightgreen.svg?color=brightgreen)](https://www.javadoc.io/doc/com.github.bbottema/generic-object-pool) 
+[![Javadocs](https://img.shields.io/badge/javadoc-2.6.0-brightgreen.svg?color=brightgreen)](https://www.javadoc.io/doc/com.github.bbottema/generic-object-pool)
 [![Codacy](https://img.shields.io/codacy/grade/b1183f7def224cd7b505b42a9a1e2b65.svg?style=flat)](https://www.codacy.com/app/b-bottema/generic-object-pool)
 
 # generic-object-pool
@@ -25,7 +25,7 @@ Maven Dependency Setup
 <dependency>
 	<groupId>com.github.bbottema</groupId>
 	<artifactId>generic-object-pool</artifactId>
-	<version>2.5.1</version>
+	<version>2.6.0</version>
 </dependency>
 ```
 
@@ -34,10 +34,11 @@ For JPMS applications, the published JAR declares the stable automatic module na
 
 ## Release Notes
 
-2.6.0 (unreleased)
+2.6.0 (12 October 2026)
 
 - [#26](https://github.com/bbottema/generic-object-pool/issues/26): Pause automatic pool top-up with `Allocator.isBackgroundAllocationAllowed()`, for example while your application handles a service outage. Existing allocators keep automatic top-up enabled; ordinary claims, existing resources and expiration are unchanged.
 - Returning `false` postpones spare-resource creation without an allocation error or reserved capacity. Your application decides when to allow it again; the pool does not add retries or health checks. See [Pausing automatic top-up](#pausing-automatic-top-up) for an example.
+- `AllocationContext.getClaimIdentity()` correlates one acquisition across pool integration layers. Narrowing its budget preserves the identity; starting another claim creates a new one. Java 8 and existing APIs remain supported.
 
 2.5.1 (17 September 2026)
 
@@ -105,7 +106,7 @@ resources, expiration and disposal continue normally; an allocation already unde
 Keep the check quick and thread-safe: the maintenance worker polls it outside pool bookkeeping locks and checks again
 immediately before creating a resource. A runtime exception in the check is logged and postpones top-up. This is not a
 circuit breaker for explicit claims, and it does not schedule retries or detect service recovery for you. Existing allocators
-need no changes: the default returns `true`. This API is part of the unreleased 2.6.0 work described above.
+need no changes: the default returns `true`. This API is available from 2.6.0.
 
 #### Claim / release API
 
@@ -181,6 +182,11 @@ Creating a control does not cancel anything. A control is thread-safe and one-sh
 Each call starts a new monotonic budget covering selection by an outer pool, lock waiting, availability and preparation.
 `claimMatching(predicate, options)` has the same contract but never allocates resources. Zero budget starts no preparation.
 The legacy timeout methods retain their existing wait semantics; they do not gain a total deadline implicitly.
+
+Pool integrations can correlate one running claim across layers using `context.getClaimIdentity()`. The opaque object
+is unique to each `ClaimOptions.start()` call; `limitedTo(...)` keeps the same identity while narrowing its budget.
+For example, register a caller's observation by that identity before `claimWithContext(context)`, then remove it in
+`finally` after the claim settles. It is not a resource ID or a reusable job ID. Ordinary callers need no extra wiring.
 
 Cancellation ends at handoff: requesting it after `claim` returns does not revoke the borrowed resource. It does not
 interrupt an executor thread. Allocator callbacks run on the claiming thread (core replenishment remains pool-owned),

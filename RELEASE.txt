@@ -3,12 +3,13 @@ https://github.com/bbottema/generic-object-pool
 
 RELEASE NOTES generic-object-pool
 
-v2.6.0 (unreleased)
+v2.6.0 (12 October 2026)
 
 - #26: Pause automatic pool top-up with Allocator.isBackgroundAllocationAllowed(), for example while an application handles a service outage.
   Returning false postpones spare-resource creation without an allocation error or reserved capacity. Ordinary claims and existing resources are unchanged.
   Automatic top-up stays enabled by default; the application decides when to pause or resume it.
-  Java 8 and existing allocator implementations remain supported. This version is not published yet.
+- #26: Correlate a running acquisition across integration layers with AllocationContext.getClaimIdentity(); narrowing its budget preserves the identity.
+  Java 8, existing allocator implementations and JPMS module naming remain supported.
 
 
 v2.5.1 (17 September 2026)
