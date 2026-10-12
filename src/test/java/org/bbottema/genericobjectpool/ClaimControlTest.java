@@ -14,6 +14,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ClaimControlTest {
 	@Test
+	void eachStartedClaimHasItsOwnIdentityAndNarrowingPreservesIt() {
+		final ClaimOptions options = ClaimOptions.withoutTimeout();
+		final AllocationContext first = options.start();
+		assertThat(first.getClaimIdentity()).isNotNull().isNotSameAs(options.start().getClaimIdentity());
+		assertThat(first.limitedTo(new Timeout(30, SECONDS)).limitedTo(new Timeout(10, SECONDS)).getClaimIdentity())
+				.isSameAs(first.getClaimIdentity());
+	}
+
+	@Test
 	void controlIsOptInOneShotAndOptionsAreImmutable() {
 		final ClaimControl control = new ClaimControl();
 		final ClaimOptions plain = ClaimOptions.withTimeout(30, SECONDS);

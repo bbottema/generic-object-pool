@@ -7,12 +7,18 @@ import org.bbottema.genericobjectpool.ClaimOptions;
 import org.bbottema.genericobjectpool.GenericObjectPool;
 import org.bbottema.genericobjectpool.PoolConfig;
 import org.bbottema.genericobjectpool.PoolableObject;
+import org.bbottema.genericobjectpool.util.Timeout;
 
 import java.util.concurrent.TimeUnit;
 
 /** Runs on both the classpath and module path without a test framework. */
 public final class PoolApiConsumer {
 	public static void main(final String[] args) throws Exception {
+		final AllocationContext context = ClaimOptions.withTimeout(2, TimeUnit.SECONDS).start();
+		if (context.getClaimIdentity() != context.limitedTo(new Timeout(1, TimeUnit.SECONDS)).getClaimIdentity()
+				|| context.getClaimIdentity() == ClaimOptions.withoutTimeout().start().getClaimIdentity()) {
+			throw new AssertionError("Claim identity did not survive budget narrowing independently");
+		}
 		final ClaimControl control = new ClaimControl();
 		final GenericObjectPool<String> pool = new GenericObjectPool<>(PoolConfig.<String>builder().maxPoolsize(1).build(),
 				new Allocator<String>() {

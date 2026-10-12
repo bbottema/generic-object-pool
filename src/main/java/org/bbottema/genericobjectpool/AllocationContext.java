@@ -22,13 +22,31 @@ public final class AllocationContext {
 	private final long startedAtNanos;
 	private final long timeoutNanos;
 	private final ClaimControl claimControl;
+	private final Object claimIdentity;
 	private final List<CancellationRegistration> registrations = new ArrayList<>();
 	private boolean handlersDetached;
 
 	AllocationContext(final long startedAtNanos, final long timeoutNanos, final ClaimControl claimControl) {
+		this(startedAtNanos, timeoutNanos, claimControl, new Object());
+	}
+
+	private AllocationContext(final long startedAtNanos, final long timeoutNanos, final ClaimControl claimControl, final Object claimIdentity) {
 		this.startedAtNanos = startedAtNanos;
 		this.timeoutNanos = timeoutNanos;
 		this.claimControl = claimControl;
+		this.claimIdentity = claimIdentity;
+	}
+
+	/**
+	 * Identifies this one claim as it passes through pool integration layers. Use reference identity to associate
+	 * callbacks with their caller; the object contains no resource, caller or cancellation state. Each
+	 * {@link ClaimOptions#start()} creates a new identity, and {@link #limitedTo(Timeout)} preserves it.
+	 *
+	 * @return a non-null opaque identity, valid for the lifetime of this claim
+	 * @since 2.6.0
+	 */
+	public Object getClaimIdentity() {
+		return claimIdentity;
 	}
 
 	/** Returns whether the caller requested cancellation, not whether cleanup is finished. */
@@ -65,7 +83,7 @@ public final class AllocationContext {
 	public AllocationContext limitedTo(final Timeout timeout) {
 		requireNonNull(timeout, "timeout");
 		final long limit = Math.max(0, timeout.getTimeUnit().toNanos(timeout.getDuration()));
-		return new AllocationContext(startedAtNanos, Math.min(timeoutNanos, limit), claimControl);
+		return new AllocationContext(startedAtNanos, Math.min(timeoutNanos, limit), claimControl, claimIdentity);
 	}
 
 	/**
